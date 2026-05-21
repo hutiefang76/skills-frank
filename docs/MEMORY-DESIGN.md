@@ -1,5 +1,7 @@
 # 分布式记忆方案设计（DESIGN.md §7.4 补充）
 
+> ⚠️ **DEPRECATED (2026-05-21)** — 本文档的"Python mem0 服务 + Rust MCP 适配"路线已被 [ADR-003: frank-memory Rust 重写](ADR/003-frank-memory-rust.md) 取代。保留供历史参考,**实施请按 ADR-003**。
+
 ## TL;DR（v2 — 用户拍板版）
 
 frank 的分布式记忆 = **自建 PostgreSQL + pgvector（你机器上 Docker）** + **mem0 Python 服务（同机）** + **frank-sync-agent (Rust) 做 MCP 协议适配层**。

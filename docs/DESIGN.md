@@ -7,7 +7,7 @@
 | **Author** | hutiefang |
 | **Reviewer** | TBD |
 | **Created** | 2026-05-21 |
-| **Last updated** | 2026-05-21 |
+| **Last updated** | 2026-05-21 (P5/P6 加入) |
 | **Repo** | `git@github.com:hutiefang76/skills-frank.git` |
 | **Local path** | `D:\workspace\skills-frank\` |
 
@@ -40,13 +40,14 @@
 **核心抓手**：
 1. **一键 install/uninstall/list/enable/disable/update/rollback** skills 与 MCP
 2. **三类来源**（公共 · 自研 · 公司）权限分仓 + 凭据隔离
-3. **分布式记忆**通过腾讯云四件套同步：CLAUDE.md 规则 / memory MCP 后端 / session log 归档 / skill 使用统计
-4. **AI 可写 feature 分支**（禁写 main）实现自维护
-5. **三种交互方式**：`frank` CLI / Slash Command / WebUI（P3）
+3. **分布式记忆**通过腾讯云 VM Docker(qdrant + caddy + frank-sync-agent),mem0-同思路 Rust 实现 (P5)
+4. **多 Agent 协作总线** (P6,ADR-004): 替代 CCB tmux 路线,浏览器 Web UI + axum API
+5. **AI 可写 feature 分支**(禁写 main)实现自维护
+6. **三种交互方式**：`frank` CLI / Slash Command / WebUI(P3)
 
-**技术栈**：Go 1.22+（CLI）· 腾讯云（CVM + TencentDB + COS + KMS）· Tauri（WebUI，P3）
+**技术栈**：Rust 1.75+ Cargo workspace · 子 crate (frank-cli / frank-memory / frank-sync-agent / frank-orchestrator) · 腾讯云 VM Docker (Caddy + Qdrant + axum,跑在 tx:8318) · Tauri 或静态 SPA (WebUI,P3)
 
-**MVP 时间**：P0 = 1 周；全部 P0-P4 = 5 周
+**MVP 时间**：P0 完成 + P5/P6 启动；后续 P1/P3/P4 排队
 
 ---
 
@@ -84,13 +85,15 @@
 | 1. 一键安装常用 skills/MCP | `frank install` + manifest | P0 |
 | 2. 自动化更新 | `frank update` + 定时任务 | P1 |
 | 3. 一键启用/禁用 | `frank enable/disable` + state.json | P0 |
-| 4. 分布式记忆（腾讯云） | sync-agent + TencentDB + COS | P2 |
+| 4. 分布式记忆 (v1: 腾讯云四件套 → v2: 自建 Docker stack 见 ADR-003) | sync-agent + Qdrant + Postgres | P5 (重新规划) |
 | 5. CLI / UI / Slash 三种入口 | frank-cli / Tauri webui / slash-commands | P0 / P3 / P0 |
 | 6. AI 自动拉取 + 使用中维护 | MCP server adapter + PR bot | P4 |
 | 7. 低资源安全更新 + 回滚 | snapshot before update + `frank rollback` | P1 |
 | 8. 支持 Claude/codex/opencode CLI + app | 三个 adapter | P0 |
 | 9. 其他建议（见下） | 见下 | 持续 |
 | 10. 公共 + 自研 + 公司 三类来源 | 三 visibility + 分 manifest | P0 |
+| 11. 分布式记忆 Rust 化 (mem0 同思路) | `frank-memory` crate + Qdrant + LLM 抽取 | **P5** → [ADR-003](ADR/003-frank-memory-rust.md) |
+| 12. 多 Agent 协作总线 (替代 CCB tmux) | `frank-orchestrator` crate + Web UI + axum WS | **P6** → [ADR-004](ADR/004-frank-orchestrator.md) |
 
 **第 9 项"其他建议"**（设计期已并入）：
 - manifest-driven 元数据
@@ -140,7 +143,7 @@
 │ L3 入口层 (User Interface)                                              │
 │   ┌──────────────┐  ┌────────────────────┐  ┌──────────────────────┐   │
 │   │  frank CLI   │  │ /frank Slash Cmd   │  │  Tauri WebUI (P3)    │   │
-│   │  (Go binary) │  │  (3 platforms)     │  │  React + Rust shell  │   │
+│   │  (Rust bin)  │  │  (3 platforms)     │  │  React + Rust shell  │   │
 │   └──────┬───────┘  └─────────┬──────────┘  └──────────┬───────────┘   │
 └──────────┼─────────────────────┼──────────────────────────┼────────────┘
            ↓                     ↓                          ↓
@@ -171,16 +174,33 @@
 │   └─────────────────┘  └──────────────────┘  └─────────────────────┘   │
 │                                                                          │
 │   ┌─────────────────────────────────────────────────────────────────┐  │
-│   │ 腾讯云 sync-agent (CVM + 三件套 + KMS)                          │  │
-│   │   - TencentDB PostgreSQL  → memory MCP 后端（实体/关系图）       │  │
-│   │   - TencentDB MySQL       → skill 调用统计（call_count/fail）   │  │
-│   │   - COS (对象存储)        → session log 归档 + CLAUDE.md 规则   │  │
-│   │   - KMS                   → 凭据加密（公司 skills 必走）         │  │
+│   │ 腾讯云 VM (tx, 101.35.227.232) — Docker Compose 编排 (ADR-005)   │  │
+│   │   唯一对外端口: 8318 (TLS 终止 by Caddy)                          │  │
+│   │                                                                 │  │
+│   │     ┌──────────┐    ┌──────────┐    ┌─────────────────┐        │  │
+│   │     │  Caddy   │←───│  qdrant  │    │ frank-sync-agent│        │  │
+│   │     │ :8318→   │    │ :6333    │←───│  (axum REST+WS) │        │  │
+│   │     │ /memory/ │    │ :6334    │    │  :3000 内部     │        │  │
+│   │     │ /orchstr/│    │ vec DB   │    │  /memory + /orch│        │  │
+│   │     │ /qdrant/ │    └──────────┘    └─────────────────┘        │  │
+│   │     └──────────┘                          │                    │  │
+│   │                              ┌─────────────┘                    │  │
+│   │                              ↓                                  │  │
+│   │                         ┌──────────┐                            │  │
+│   │                         │ Postgres │  (P6 orchestrator 启用)    │  │
+│   │                         │ :5432    │                            │  │
+│   │                         └──────────┘                            │  │
+│   │                                                                 │  │
+│   │ 当前状态: caddy + qdrant 已部署 (2026-05-21); sync-agent 骨架就绪│  │
 │   └─────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+> 注: 原 v1 设计中的 TencentDB / COS / KMS 四件套已由自建 Docker stack 取代,详见 ADR-003/005 与 §15 文档版本演进。
+
 ### 4.2 数据流（典型场景：装一个公司 skill）
+
+> 注: 下方流程是 v1 概念草图(仍能说明 install 端到端经过哪些组件); sync-agent 一段已由 ADR-003 的"frank-memory + axum REST"替代,KMS / TencentDB 一段在 v2 已不适用。
 
 ```
 用户: $ frank install kdwl:vehicle-events
@@ -226,6 +246,8 @@
 ```
 
 ### 4.3 部署拓扑
+
+> ⚠️ 下方为 v1 部署拓扑(Go / TencentDB / COS / KMS),已被 §4.1 末尾的实际拓扑图与 [ADR-005](ADR/005-deploy-tencent-8317.md) 取代。保留供历史对比;**实际部署看 §4.1**。
 
 ```
 ┌──────────────────────────┐         ┌──────────────────────────┐
@@ -371,8 +393,10 @@ skills-frank/
 
 #### 6.1.3 CLI 框架选型
 
-- **cobra**（cli 框架）+ **viper**（配置）+ **lipgloss**（TUI 样式）+ **go-git**（git 操作，无需外部 git）+ **yaml.v3**（manifest 解析）
-- 单二进制，cross-compile 矩阵：`windows/amd64`、`darwin/arm64`、`darwin/amd64`、`linux/amd64`
+> 注: v1 拟用 Go (cobra + viper + lipgloss + go-git + yaml.v3); 实际按 [ADR-001](ADR/001-language-rust.md) 改 Rust, 等效栈见下。
+
+- **clap (derive)**(CLI 解析,支持 env / default / subcommand)+ **owo-colors**(TUI 着色)+ **tabled**(`frank list` 表格)+ **git2** (vendored libgit2, 无系统依赖) + **serde_yml**(manifest 解析,serde_yaml fork)
+- 单二进制,cross-compile 矩阵 (release.yml):`x86_64-unknown-linux-gnu` / `x86_64-pc-windows-msvc` / `x86_64-apple-darwin` / `aarch64-apple-darwin` (+ ubuntu/win/macos CI test matrix)
 
 ### 6.2 manifest 系统
 
@@ -666,7 +690,11 @@ skills:
     # 纯文档 skill, 无依赖
 ```
 
-### 7.4 腾讯云存储 schema
+### 7.4 v1 腾讯云存储 schema (历史保留)
+
+> ⚠️ 下面 §7.4.1 ~ §7.4.3 是 v1 设计的 TencentDB / COS schema, 已被 [ADR-003 frank-memory](ADR/003-frank-memory-rust.md) (Qdrant collection) 与 [ADR-004 orchestrator](ADR/004-frank-orchestrator.md) (Postgres job 表) 取代。
+> §7.4.4 本地 state.json 仍然有效。
+> 保留这部分供历史对比 + 后续若回到关系型存储时复用。
 
 #### 7.4.1 TencentDB PostgreSQL（memory MCP 后端）
 
@@ -878,7 +906,9 @@ cos://frank-storage-<userid>/
 | `frank rollback --to <ts>` | 60 秒内恢复任意历史快照 |
 | `frank doctor` | 列出所有 skill 健康状态 |
 
-### P2 — 分布式记忆（1 周）
+### P2 — 分布式记忆（v1 表述,实际拆分到 P5 / 部署见 ADR-005)
+
+> ⚠️ 原 P2 (TencentDB + COS + KMS) 已被 ADR-003/005 拆分: 分布式记忆 → P5 (frank-memory + Qdrant); 部署 → 自建 Docker stack tx:8318; CLAUDE.md / session log 同步推迟。下表保留供历史对比。
 
 | 任务 | 验收 |
 |---|---|
@@ -900,6 +930,30 @@ cos://frank-storage-<userid>/
 - `frank ai-suggest` 命令
 - AI prompt 模板（让 AI 知道改什么 / 不改什么）
 - Smoke test 矩阵扩展（三平台 + AI 改动 = 9 case）
+
+### P5 — frank-memory: mem0 同思路 Rust 重写（2 周,进行中）
+
+详见 [ADR-003](ADR/003-frank-memory-rust.md)。
+
+| 任务 | 验收 |
+|---|---|
+| `crates/frank-memory` 骨架: store/embed/extract/client | 🟢 已落地,14 单测全绿 |
+| Qdrant 容器在 tx:8318 跑通 | 🟢 已部署 (2026-05-21) |
+| OpenAI embedding + Anthropic Haiku fact extractor | 端到端真测 (待 API key) |
+| `frank-sync-agent` REST: `/memory/add` `/memory/search` 等 | axum 路由就位,待业务接线 |
+| `frank memory add\|search\|list` CLI 子命令 | 调 sync-agent,跨设备生效 |
+
+### P6 — frank-orchestrator: 多 Agent 协作总线（1-2 周,设计完成）
+
+详见 [ADR-004](ADR/004-frank-orchestrator.md)。
+
+| 任务 | 验收 |
+|---|---|
+| `crates/frank-orchestrator` 骨架 (Job / Step / Worker trait) | 🟢 已落地 |
+| Postgres job 表 schema + sqlx | DDL 跑通,job 状态机持久化 |
+| `RestWorker` (Claude / OpenAI / Anthropic) + `LocalCliWorker` (codex / gemini) | 单 step 真跑通,日志 WS 推流 |
+| 浏览器 Web UI: 任务看板 + 单任务时间线 + WS 实时流 | 静态 SPA,caddy 反代 `/ui/` |
+| 与 frank-memory 联动: 跨 job 经验召回 | search 拿到上下文,提示词注入 |
 
 ---
 
@@ -1030,9 +1084,10 @@ frank 要面向**陌生人分发**（非自用），分发体验是核心约束�
 
 - Claude Code skills 规范：https://docs.claude.com/claude-code/skills
 - Anthropic Skill Engineering: https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills
-- Tencent Cloud KMS：https://cloud.tencent.com/document/product/573
 - Tauri 文档：https://tauri.app
-- Cobra CLI：https://github.com/spf13/cobra
+- clap (Rust CLI 框架):https://docs.rs/clap
+- Qdrant Rust SDK:https://github.com/qdrant/rust-client
+- mem0 (思路参考):https://github.com/mem0ai/mem0
 
 ### 14.2 相关项目（你已有的）
 
@@ -1055,8 +1110,16 @@ frank 要面向**陌生人分发**（非自用），分发体验是核心约束�
 
 ---
 
-## 15. 文档变更历史
+## 15. 文档版本演进
 
 | 版本 | 日期 | 作者 | 变更 |
 |---|---|---|---|
-| 0.1 | 2026-05-21 | hutiefang + Claude | 初始 draft，对齐 P0-P4 架构 |
+| 0.1 | 2026-05-21 | hutiefang + Claude | 初始 draft,对齐 P0-P4 架构 |
+| 0.2 | 2026-05-21 (P5/P6 启动) | hutiefang + Claude | 见下条目 |
+
+**0.2 — 2026-05-21 (P5/P6 启动)**
+
+- mem0 路线由 Python 服务改 Rust 重写 ([ADR-003](ADR/003-frank-memory-rust.md))
+- 多 Agent 协作由 CCB tmux 改 Web UI + API ([ADR-004](ADR/004-frank-orchestrator.md))
+- 部署到 tx:8318 ([ADR-005](ADR/005-deploy-tencent-8317.md))
+- 仓库结构改 Cargo workspace ([ADR-002](ADR/002-cargo-workspace.md))
