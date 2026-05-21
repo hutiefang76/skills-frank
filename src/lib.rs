@@ -2,12 +2,12 @@
 //!
 //! # 模块导览
 //!
-//! - [`cli`]: 命令行解析与 dispatch (clap derive)
-//! - [`log`]: 统一日志 + UI 着色打印 (tracing + owo-colors)
-//! - [`manifest`]: skill / MCP 元数据 YAML 解析
-//! - [`adapter`]: 三平台 (Claude / codex / opencode) 渲染适配器
-//! - [`installer`]: 安装/卸载实现 (git fetch + junction/symlink)
-//! - [`state`]: 本地状态管理 (state.json + snapshots)
+//! - `cli` — 命令行解析与 dispatch (clap derive)
+//! - `log` — 统一日志 + UI 着色打印 (tracing + owo-colors)
+//! - `manifest` — skill / MCP 元数据 YAML 解析
+//! - `adapter` — 三平台 (Claude / codex / opencode) 渲染适配器
+//! - `installer` — 安装/卸载实现 (git fetch + junction/symlink)
+//! - `state` — 本地状态管理 (state.json + snapshots)
 //!
 //! # 设计原则
 //!

@@ -5,7 +5,7 @@
 //!
 //! # 文件结构
 //!
-//! - [`schema`]: 数据结构定义 (serde struct, 直接映射 YAML)
+//! - `schema` — 数据结构定义 (serde struct, 直接映射 YAML)
 //! - `parser` (P0 day1-2 待实现): 加载 + 合并多个 manifest 文件
 //! - `resolver` (P0 day1-2 待实现): 名字 → 完整 Skill 项的查找
 //!

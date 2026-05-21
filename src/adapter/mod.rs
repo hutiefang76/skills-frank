@@ -13,7 +13,7 @@
 //!
 //! 具体实现 (claude.rs / codex.rs / opencode.rs) 待 P0 day3-4 完成。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
@@ -31,7 +31,7 @@ pub trait Adapter {
     ///
     /// `source` 是 frank cache 中已 clone/checkout 好的源目录,
     /// adapter 负责创建 junction/symlink + 渲染 slash command 等。
-    fn install(&self, skill: &Skill, source: &PathBuf) -> Result<()>;
+    fn install(&self, skill: &Skill, source: &Path) -> Result<()>;
 
     /// 从当前平台移除。
     fn uninstall(&self, skill: &Skill) -> Result<()>;

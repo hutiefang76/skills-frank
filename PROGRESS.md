@@ -1,8 +1,9 @@
 # Frank 进度记录
 
-> **当前状态**：P0 Sprint Day 1 完成 ✅
+> **当前状态**：P0 Sprint Day 2 完成 ✅ · `frank list` 端到端跑通
 > **日期**：2026-05-21
-> **下次开工**：P0 Day 2 (manifest parser + resolver)
+> **下次开工**：P0 Day 3-4 (installer + 三平台 adapter)
+> **GitHub**：[github.com/hutiefang76/skills-frank](https://github.com/hutiefang76/skills-frank) · main = `clippy 0-warning + 真跑通`
 
 ---
 
@@ -58,13 +59,23 @@
 
 ---
 
-## 📋 Day 2-5 待办（P0 Sprint）
+## ✅ Day 2 完成 (commit `34b0565`)
 
-### Day 2 — manifest 解析
-- [ ] `src/manifest/parser.rs` 加载 + 合并多 YAML
-- [ ] `src/manifest/resolver.rs` name → Skill 查找
-- [ ] `manifest/public.yaml` 枚举公开 skills（doris-ops / feishu-read / nacos-config 等）
-- [ ] manifest 集成测试
+- [x] `src/manifest/parser.rs` load_file + discover + merge (后覆盖前)
+- [x] `src/manifest/resolver.rs` Registry: find / all / by_profile
+- [x] `src/cli/list.rs` clap Args + tabled 表格输出
+- [x] `manifest/public.yaml` 7 个公开 skills (2 公共 + 5 自研)
+- [x] 单元测试 6/6 全通过
+- [x] `frank list` 端到端真测 ✅
+
+## ✅ 依赖升级 + clippy 收紧 (commit `2f7943e` + 后续)
+
+- [x] serde_yaml DEPRECATED → serde_yml 0.0.12
+- [x] thiserror 1 → 2.0 / tabled 0.15 → 0.17 / dirs 5 → 6
+- [x] clippy --all-features -- -D warnings 0 warning ✅
+- [x] CI 标准达成
+
+## 📋 Day 3-5 待办（P0 Sprint）
 
 ### Day 3-4 — installer + adapter
 - [ ] `src/installer/git.rs` 用 `git2` 实现 sparse-checkout + subpath

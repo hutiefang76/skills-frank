@@ -79,10 +79,16 @@ opt-level = 0        # 开发期不优化, 编译快
 # 项目要求: 代码结构清晰 (用户明确要求, 见 ADR-001)
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-# 允许的例外 (pedantic 太学究的几条)
+# 允许的例外 (pedantic 太学究, 或与中文项目风格冲突的几条)
 module_name_repetitions = "allow"
-missing_errors_doc = "allow"  # anyhow::Result 不强制写 Errors 节
+missing_errors_doc = "allow"      # anyhow::Result 不强制写 # Errors 节
 missing_panics_doc = "allow"
+doc_markdown = "allow"            # 中文文档里英文专有名词不强制反引号
+default_trait_access = "allow"    # 测试代码 Default::default() 更简洁
+must_use_candidate = "allow"      # 不是所有 getter 都要 #[must_use]
+needless_pass_by_value = "allow"  # clap Args 按值传符合惯例
+items_after_statements = "allow"  # 工具函数可以放在 use 后
+unnecessary_wraps = "allow"       # dispatcher 模式统一返回 Result<()>
 
 [lints.rust]
 # 注释完整 (用户明确要求, 见 ADR-001)
