@@ -1,9 +1,57 @@
 # Frank 进度记录
 
-> **当前状态**：P0 Sprint Day 3-4 完成 ✅ · `frank install/uninstall/enable/disable/list` 全端到端跑通 (macOS)
-> **日期**：2026-05-21
-> **下次开工**：P0 Day 5 (验收 + CI smoke matrix + v0.1.0 tag); 或先 P1 (update/rollback/doctor)
+> **当前状态**：P0 完整 ✅ + P5/P6 启动 (workspace + frank-memory + frank-sync-agent + qdrant on tx)
+> **日期**：2026-05-21 (夜班至 23:00)
+> **下次开工**：P0 Day 5 (CI smoke + v0.1.0 tag); 或继续 P5/P6 (mem0 端到端真测 / orchestrator 实现)
 > **GitHub**：[github.com/hutiefang76/skills-frank](https://github.com/hutiefang76/skills-frank) · main = `clippy 0-warning + 真跑通`
+
+## 🌙 夜班记录 (2026-05-21 21:00 → 23:00)
+
+用户去睡觉, 我独立完成以下:
+
+### 架构演进
+- ✅ skills-frank 由单 crate 改为 **Cargo workspace** (frank-cli 搬到 crates/frank-cli)
+- ✅ 新增 3 个子 crate: `frank-memory` (P5 落地) / `frank-sync-agent` (P5 服务端) / `frank-orchestrator` (P6 待建)
+- ✅ 4 个新 ADR: 002 workspace / 003 frank-memory / 004 orchestrator / 005 部署 tx:8317
+
+### 代码量 (新增)
+- frank-memory: 8 文件 (memory + store + embed + extract + client), 14 单测全绿
+- frank-sync-agent: 3 文件 (main + state + routes), axum REST + WS 占位
+- deploy: docker-compose + Caddyfile + README
+
+### 服务器实际部署
+- `tx` 摸底: 3.3G RAM (1G 可用) / 49G/59G 磁盘 / 已跑 9 个容器
+- **8317 已被你的 cli-proxy-api 占用** (systemd 守护 2 个月, 305MB), 我**改用 8318**
+- 在 tx:/opt/frank/ 起了 frank-qdrant (Qdrant v1.13.0) + frank-caddy (2.10-alpine)
+- UFW 已开 8318/tcp
+- 本机 curl http://localhost:8318/healthz + /qdrant/healthz 全 200 ✅
+
+### ⚠️ 待你决策 (醒来看一下)
+
+1. **腾讯云控制台安全组** 需要开 8318/tcp 入站, 否则外网 (你的本机) 访问不到 — 我没权限改
+2. **cli-proxy-api 是否替换?** 它在 8317 跑 AI 网关 + 管理 UI, 跟 frank-orchestrator 的目标重叠。
+   - 选项 A: 让我用 8318 跟它并存
+   - 选项 B: 停掉 cli-proxy-api, frank-stack 接管 8317
+3. **OPENAI_API_KEY + ANTHROPIC_API_KEY** 后续 sync-agent 跑 mem0 端到端需要; 你给我一个或挂到 tx 环境变量
+4. **frank-orchestrator 实现什么时候?** 设计文档已就绪 (ADR-004), 实现工作量约 1-2 周
+
+### 6 个 commit 已 push (按时间序)
+```
+b419d3d feat(P0 day3-4): installer + 三平台 adapter + state + 4 子命令端到端跑通
+8c858d3 docs: CLAUDE.md + PROGRESS Day 3-4 完成清单
+0f4e852 refactor: 转 Cargo workspace, frank-cli 搬到 crates/frank-cli
+99ce303 docs(ADR): 002 workspace + 003 frank-memory + 004 orchestrator + 005 部署
+884bf4d feat(frank-memory): mem0 同思路 Rust 重写骨架
+a2dde7a feat(frank-sync-agent + deploy): axum 服务端骨架 + qdrant 已部署到 tx
+```
+
+### 验收数据 (workspace 全量)
+- cargo test --workspace --all-features: **34/34** 全绿
+- cargo clippy --workspace --all-targets --all-features -- -D warnings: **0** warning
+- 每文件 < 300 行 (新增文件全合规, 最大 261 = store/qdrant.rs)
+
+---
+
 
 ---
 
@@ -118,9 +166,11 @@
 | Phase | 内容 | 预计 |
 |---|---|---|
 | **P1** (3 天) | `frank update` + `rollback` + `doctor` | day6-8 |
-| **P2** (1 周) | docker-compose (PG + mem0 + sync-agent) + Tailscale 接入 | week 2 |
-| **P3** (1 周) | Tauri WebUI | week 3 |
+| **P2** (3 天) | docker-compose (caddy + qdrant) 上 tx — 🟢 **qdrant + caddy 已部署 2026-05-21** | 部分完成 |
+| **P3** (1 周) | Tauri WebUI 或 orchestrator web SPA | week 3 |
 | **P4** (1 周) | AI 自维护 PR 流程 | week 4 |
+| **P5** (2 周) | **frank-memory** — mem0 同思路 Rust 重写 🟢 **骨架 + qdrant 部署完成** | 进行中 |
+| **P6** (1-2 周) | **frank-orchestrator** — 多 AI Agent 协作总线 (Web UI + API) | 设计完成 |
 
 ---
 
@@ -132,29 +182,41 @@
 
 ---
 
-## 📂 当前文件树
+## 📂 当前文件树 (workspace 转换后)
 
 ```
 skills-frank/
-├── Cargo.toml + .gitignore + .gitattributes + rustfmt.toml
-├── README.md
-├── PROGRESS.md                       ← 本文件
-├── src/                              ← 10 个 Rust 文件, cargo check ✅ 5.80s
-│   ├── main.rs / lib.rs / log.rs
-│   ├── cli/{mod,install}.rs
-│   ├── manifest/{mod,schema}.rs
-│   ├── adapter/mod.rs
-│   ├── installer/mod.rs
-│   └── state/mod.rs
+├── Cargo.toml                          ← workspace 根: members + 共享 lints/profile/deps
+├── Cargo.lock
+├── CLAUDE.md / PROGRESS.md / README.md
+├── crates/
+│   ├── frank-cli/                       ← P0 主 CLI (已完成, 14 文件, 端到端跑通)
+│   │   ├── Cargo.toml / src/ / manifest/
+│   ├── frank-memory/                    ← P5 mem0 重写 (8 文件, 14 单测)
+│   │   ├── src/{lib,memory,client}.rs
+│   │   ├── src/store/{mod,qdrant}.rs
+│   │   ├── src/embed/{mod,openai}.rs
+│   │   └── src/extract/{mod,claude}.rs
+│   └── frank-sync-agent/                ← P5 服务端 host (3 文件, 3.8MB 二进制)
+│       └── src/{main,state,routes}.rs
+├── deploy/                              ← Docker Compose 部署 (已上 tx)
+│   ├── docker-compose.yml
+│   ├── Caddyfile
+│   └── README.md
 ├── docs/
-│   ├── DESIGN.md                     ← 1030 行 / 14 章
-│   ├── ADR/001-language-rust.md
-│   ├── MEMORY-DESIGN.md              ← v2 自建版
+│   ├── DESIGN.md                        ← 1030 行 / 14 章
+│   ├── ADR/
+│   │   ├── 001-language-rust.md
+│   │   ├── 002-cargo-workspace.md      🆕
+│   │   ├── 003-frank-memory-rust.md    🆕
+│   │   ├── 004-frank-orchestrator.md   🆕
+│   │   └── 005-deploy-tencent-8317.md  🆕
+│   ├── MEMORY-DESIGN.md                 ← v2 (被 ADR-003 取代)
 │   └── RUSTROVER.md
-├── .idea/                            ← 9 RunConfig + codeStyles + vcs (入仓共享)
+├── .idea/                               ← 9 RunConfig + codeStyles + vcs (入仓共享)
 └── .github/workflows/
-    ├── ci.yml                        ← fmt + clippy + test 矩阵 + 内网扫描
-    └── release.yml                   ← 6 target 跨平台 + GitHub Release
+    ├── ci.yml                           ← fmt + clippy + test 矩阵 + 内网扫描
+    └── release.yml                      ← 6 target 跨平台 + GitHub Release
 ```
 
 **累计代码 + 文档**：约 2200 行
