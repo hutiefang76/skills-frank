@@ -57,6 +57,23 @@ git2 = { version = "0.20", default-features = false, features = [
 # Hostname 获取: device_allowlist 校验
 gethostname = "0.5"
 
+# HTTP 客户端: 调用 frank-sync-agent REST API
+# blocking 因为 frank-cli 不引入 async runtime; rustls 跨平台无系统依赖
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "webpki-roots",
+    "json",
+    "gzip",
+    "blocking",
+] }
+
+# TOML 配置: ~/.frank/config.toml 解析 (memory sync agent URL 等)
+toml = "0.8"
+
+# frank-memory 类型复用: Scope / MemoryRecord / MemoryMatch / MemoryId
+# 走 path 依赖, 不上 crates.io
+frank-memory = { path = "../frank-memory" }
+
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"

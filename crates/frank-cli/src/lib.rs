@@ -25,7 +25,9 @@ pub mod cli;
 pub mod installer;
 pub mod log;
 pub mod manifest;
+pub mod scanner;
 pub mod state;
+pub mod sync_client;
 
 /// 项目当前版本 (与 Cargo.toml 同步)。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

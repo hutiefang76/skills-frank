@@ -15,10 +15,14 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 // 各子命令模块声明 (P0 day3-4: install / uninstall / enable / disable / list 已落地)
+pub mod dedupe;
 pub mod disable;
 pub mod enable;
+pub mod import;
 pub mod install;
 pub mod list;
+pub mod memory;
+pub mod scan;
 pub mod uninstall;
 
 /// frank — AI 工具链治理平台 CLI。
@@ -64,6 +68,18 @@ enum Commands {
     /// 禁用: 移除链接但保留 state (与 uninstall 区别: 可一键恢复)。
     Disable(disable::Args),
 
+    /// 操作分布式记忆 (frank-sync-agent REST 客户端)。
+    Memory(memory::Args),
+
+    /// 扫描三平台 skills 目录, 与 state 对照 (managed / external / 漂移)。
+    Scan(scan::Args),
+
+    /// 把外部 (用户手工装的) skill 收编进 frank 管理。
+    Import(import::Args),
+
+    /// 检测并清理同名 skill 在多平台 target 不一致的重复安装。
+    Dedupe(dedupe::Args),
+
     // ----- 以下为占位, P1 实现 -----
     /// 升级到最新版本 (P1 待实现)。
     Update,
@@ -87,6 +103,10 @@ pub fn run() -> Result<()> {
         Commands::Uninstall(args) => uninstall::run(args),
         Commands::Enable(args) => enable::run(args),
         Commands::Disable(args) => disable::run(args),
+        Commands::Memory(args) => memory::run(args),
+        Commands::Scan(args) => scan::run(args),
+        Commands::Import(args) => import::run(args),
+        Commands::Dedupe(args) => dedupe::run(args),
         Commands::Update => stub("update"),
         Commands::Rollback => stub("rollback"),
         Commands::Doctor => stub("doctor"),
