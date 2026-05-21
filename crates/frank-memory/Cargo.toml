@@ -1,0 +1,52 @@
+[package]
+name = "frank-memory"
+description = "frank-memory — mem0-style distributed memory in Rust (vector store + LLM fact extraction)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "frank_memory"
+path = "src/lib.rs"
+
+[dependencies]
+# 工作区共享
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+
+# Vector store: Qdrant 官方 Rust SDK
+# 不开 download_snapshots / generate-snippets (省体积; 我们用不到)
+qdrant-client = { version = "1.18", default-features = false, features = ["serde"] }
+
+# UUID for MemoryId
+uuid = { version = "1.23", features = ["v4", "serde"] }
+
+# Async trait (P0 用 async-trait, 待 1.75+ AFIT 成熟再切; trait_variant 当前对 dyn 不友好)
+async-trait = "0.1"
+
+# HTTP 客户端 (调 Anthropic / OpenAI REST)
+# default-features=false 去掉 native-tls, 用 rustls 跨平台无系统依赖
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "webpki-roots",
+    "json",
+    "gzip",
+] }
+
+# Random for backoff jitter (后续 retry 用)
+# rand = "0.9"  # 暂不加, retry 由 reqwest-retry 接管或简单实现
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
