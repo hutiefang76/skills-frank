@@ -1,0 +1,44 @@
+[package]
+name = "frank-orchestrator"
+description = "frank-orchestrator — 多 AI Agent 协作总线 (Web UI + API 路线, 替代 CCB)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "frank_orchestrator"
+path = "src/lib.rs"
+
+[dependencies]
+# 工作区共享
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+
+# 异步 trait (P0 用 async-trait, 与 frank-memory 保持一致)
+async-trait = "0.1"
+
+# UUID for JobId / StepId
+uuid = { version = "1.23", features = ["v4", "serde"] }
+
+# HTTP 客户端 (REST provider)
+# default-features=false 去掉 native-tls, 用 rustls 跨平台无系统依赖
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "webpki-roots",
+    "json",
+    "gzip",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
