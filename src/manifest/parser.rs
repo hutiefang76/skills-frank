@@ -25,7 +25,7 @@ use crate::manifest::schema::{Manifest, Skill};
 pub fn load_file(path: &Path) -> Result<Manifest> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("read manifest file {}", path.display()))?;
-    let m: Manifest = serde_yaml::from_str(&content)
+    let m: Manifest = serde_yml::from_str(&content)
         .with_context(|| format!("parse manifest {}", path.display()))?;
     tracing::debug!(path = %path.display(), skills = m.skills.len(), "manifest loaded");
     Ok(m)
@@ -134,8 +134,8 @@ skills:
     source: { type: git, url: 'https://example.com/v2.git' }
     visibility: private
 ";
-        let m1: Manifest = serde_yaml::from_str(yaml1).unwrap();
-        let m2: Manifest = serde_yaml::from_str(yaml2).unwrap();
+        let m1: Manifest = serde_yml::from_str(yaml1).unwrap();
+        let m2: Manifest = serde_yml::from_str(yaml2).unwrap();
         let merged = merge(vec![m1, m2]);
         assert_eq!(merged.len(), 1);
         assert!(matches!(merged[0].visibility, crate::manifest::schema::Visibility::Private));

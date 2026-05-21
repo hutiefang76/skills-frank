@@ -272,7 +272,7 @@ skills:
       url: https://github.com/hutiefang76/skills-doris-ops.git
     visibility: own-public
 ";
-        let m: Manifest = serde_yaml::from_str(yaml).expect("parse minimal manifest");
+        let m: Manifest = serde_yml::from_str(yaml).expect("parse minimal manifest");
         assert_eq!(m.schema_version, 1);
         assert_eq!(m.skills.len(), 1);
         assert_eq!(m.skills[0].name, "doris-ops");
@@ -300,7 +300,7 @@ skills:
     device_allowlist:
       - ATHENA-LAPTOP
 ";
-        let m: Manifest = serde_yaml::from_str(yaml).expect("parse private skill");
+        let m: Manifest = serde_yml::from_str(yaml).expect("parse private skill");
         let s = &m.skills[0];
         assert_eq!(s.name, "kdwl:vehicle-events");
         assert!(matches!(s.visibility, Visibility::Private));
