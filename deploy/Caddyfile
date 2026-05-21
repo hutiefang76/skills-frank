@@ -1,0 +1,52 @@
+# frank-stack Caddy 反代
+#
+# 单一对外端口 :8317; 全部用 TLS (Caddy 自签内部 CA, 浏览器会警告 — 后续上域名 + LE).
+#
+# 路由:
+#   /qdrant/healthz, /qdrant/*  → qdrant:6333 (HTTP API + 管理界面; 调试用)
+#   /memory/*, /orchestrator/*  → sync-agent:3000 (待 frank-sync-agent 上线)
+#   /healthz                    → Caddy 自身 200, 用于外部存活探针
+#   /                           → 临时 placeholder (后续放 orchestrator web SPA)
+#
+# 安全:
+#   - admin UI 通过 X-Frank-Token header 鉴权 (在腾讯云控制台单独白名单更稳)
+#   - 后续接入 OAuth / mTLS
+
+{
+  # 全局选项
+  auto_https off       # 端口非 443, 不让 Caddy 抢系统证书; 用 tls internal
+  admin off            # 关闭本地 admin API (默认开 :2019), 减少攻击面
+  log {
+    output stdout
+    format json
+    level INFO
+  }
+}
+
+:8317 {
+  # P0 暂用纯 HTTP, 接域名后改 `tls your.domain.com` 上 LE
+  # `tls internal` 在端口映射 (container:8317 → host:8318) 下证书 SAN 不匹配, 暂停用
+
+  encode gzip zstd
+
+  # 健康探针 (本机 / Tencent CLB 用)
+  respond /healthz "ok" 200
+
+  # frank-sync-agent (axum REST + WebSocket)
+  # 当前 sync-agent 还没起, 这两行先注释; sync-agent 上线后开启
+  # reverse_proxy /memory/* sync-agent:3000
+  # reverse_proxy /orchestrator/* sync-agent:3000
+
+  # Qdrant 管理 / API (Path strip: /qdrant/foo → /foo)
+  handle_path /qdrant/* {
+    reverse_proxy qdrant:6333
+  }
+
+  # 默认 placeholder (后续放 orchestrator web SPA)
+  respond / "frank-stack alive. routes: /healthz /qdrant/*  (memory/orchestrator pending sync-agent)" 200
+
+  log {
+    output stdout
+    format console
+  }
+}

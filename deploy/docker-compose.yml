@@ -1,0 +1,68 @@
+# frank-stack 服务端栈 (跑在 tx:8317)
+#
+# 当前包含 (P0):
+#   - caddy:   TLS 终止 + 反向代理 (唯一对外端口 8317)
+#   - qdrant:  vector DB, 内部 :6333 / :6334
+#
+# 待加 (P1+):
+#   - sync-agent: frank Rust 服务端 (axum, /memory + /orchestrator)
+#   - postgres:   orchestrator job 持久化
+#
+# 资源预算 (tx 总 RAM 3.3G, 可用 ~1G):
+#   - caddy:  ~30 MB
+#   - qdrant: 限制 256 MB
+#   - 合计预算: < 300 MB
+#
+# 部署:
+#   cd /opt/frank
+#   docker compose up -d qdrant && curl -sf http://localhost:6333/healthz
+#   docker compose up -d caddy && curl -sfk https://localhost:8317/healthz
+
+networks:
+  frank-net:
+    driver: bridge
+
+volumes:
+  qdrant-data:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.13.0
+    container_name: frank-qdrant
+    restart: unless-stopped
+    expose:
+      - "6333"  # HTTP
+      - "6334"  # gRPC (Rust SDK 默认用这个)
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__LOG_LEVEL: INFO
+    networks: [frank-net]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: frank-caddy
+    restart: unless-stopped
+    ports:
+      - "8318:8317"   # 注: 8317 被 cli-proxy-api 占用 (用户既有服务), 暂用 8318
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [frank-net]
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    mem_limit: 64m

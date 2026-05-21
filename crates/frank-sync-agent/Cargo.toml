@@ -1,0 +1,37 @@
+[package]
+name = "frank-sync-agent"
+description = "frank-sync-agent — axum 服务端 host: REST + WebSocket, 跑在 tx:8318"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "frank-sync-agent"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
+
+# 同 workspace 的 frank-memory crate, 走 path 依赖 (本地开发); 发版时改 version
+frank-memory = { path = "../frank-memory" }
+
+# Web framework
+axum = { version = "0.7", features = ["macros", "ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "timeout"] }
+
+# Path extractor 需要 Uuid 类型实现 (axum 通过 serde 解码)
+uuid = { version = "1.23", features = ["v4", "serde"] }
+
+[lints]
+workspace = true
