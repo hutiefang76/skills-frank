@@ -14,8 +14,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-// 各子命令模块声明 (P0 day1: 仅骨架, 实现逐步填充)
+// 各子命令模块声明 (P0 day1-2: install / list 已落地, 其余占位)
 pub mod install;
+pub mod list;
 
 /// frank — AI 工具链治理平台 CLI。
 ///
@@ -48,11 +49,12 @@ enum Commands {
     /// 解析 manifest, 拉取源码, 渲染到三平台目录。
     Install(install::Args),
 
+    /// 列出已知的 skills (表格输出, 支持 --profile 过滤)。
+    List(list::Args),
+
     // ----- 以下为占位, P0 后续 day 实现 -----
     /// 卸载 (P0 待实现)。
     Uninstall,
-    /// 列出已知的 skills (P0 待实现)。
-    List,
     /// 启用一个已安装的 skill (P0 待实现)。
     Enable,
     /// 禁用一个已安装的 skill (P0 待实现)。
@@ -75,8 +77,8 @@ pub fn run() -> Result<()> {
 
     match cli.command {
         Commands::Install(args) => install::run(args),
+        Commands::List(args) => list::run(args),
         Commands::Uninstall => stub("uninstall"),
-        Commands::List => stub("list"),
         Commands::Enable => stub("enable"),
         Commands::Disable => stub("disable"),
         Commands::Update => stub("update"),

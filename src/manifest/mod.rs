@@ -14,4 +14,6 @@
 //! manifest schema 演进需向后兼容 (R10 风险): 通过 `schema_version` 字段 + serde
 //! 默认值 / `#[serde(default)]` 兜底。详见 docs/DESIGN.md §7.1。
 
+pub mod parser;
+pub mod resolver;
 pub mod schema;
