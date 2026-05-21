@@ -95,13 +95,17 @@ pub fn run(args: Args) -> Result<()> {
 
     let rows: Vec<Row> = candidate
         .filter_map(|s| {
-            let status = state.get(&s.name).map_or("-", |st| {
-                if st.enabled {
-                    "enabled"
-                } else {
-                    "disabled"
-                }
-            });
+            let status =
+                state.get(&s.name).map_or(
+                    "-",
+                    |st| {
+                        if st.enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    },
+                );
             if args.installed && !installed_names.contains(s.name.as_str()) {
                 return None;
             }

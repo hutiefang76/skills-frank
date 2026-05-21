@@ -1,0 +1,66 @@
+[package]
+name = "frank"
+description = "AI toolchain governance platform: unified skill/MCP management across Claude Code, codex, opencode"
+readme = "README.md"
+keywords = ["cli", "ai", "skill", "mcp", "claude"]
+categories = ["command-line-utilities"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "frank"
+path = "src/main.rs"
+
+[lib]
+name = "frank"
+path = "src/lib.rs"
+
+# ---- 依赖 ----
+# 通用依赖从 workspace 继承, 仅 CLI 专属的留这里
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+
+# CLI 解析: derive 风格, 自动生成 help/version
+clap = { version = "4.6", features = ["derive", "env"] }
+
+# YAML 解析: manifest 用 (serde_yaml 已 archived, 改用社区 fork)
+serde_yml = "0.0.12"
+
+# 终端着色: 自动处理 NO_COLOR / 重定向到文件时禁用
+owo-colors = { version = "4.2", features = ["supports-colors"] }
+
+# 表格输出: frank list 用
+tabled = "0.17"
+
+# 路径处理: 跨平台 home/config 目录定位
+dirs = "6.0"
+
+# Git 操作: vendored libgit2 + vendored openssl, 无系统依赖
+git2 = { version = "0.20", default-features = false, features = [
+    "vendored-libgit2",
+    "vendored-openssl",
+    "https",
+    "ssh",
+] }
+
+# Hostname 获取: device_allowlist 校验
+gethostname = "0.5"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

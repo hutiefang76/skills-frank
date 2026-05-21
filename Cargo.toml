@@ -1,82 +1,39 @@
-[package]
-name = "frank"
+# frank — Cargo workspace 根 manifest
+#
+# 子 crate 都放在 crates/ 下:
+#   - frank-cli         CLI 主二进制 (已落地, P0)
+#   - frank-memory      分布式记忆 (mem0-同思路 Rust 重表述, P5)
+#   - frank-orchestrator 多 Agent 协作总线 (Web UI + API, P6) [待建]
+#   - frank-sync-agent  服务端 host: axum REST + WS, 跑在 tx:8317 (P2+P5)
+
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+# ---- 工作区共享元数据 (子 crate 用 `version.workspace = true` 引用) ----
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["hutiefang <hutiefang@icloud.com>"]
-description = "AI toolchain governance platform: unified skill/MCP management across Claude Code, codex, opencode"
 license = "MIT"
 repository = "https://github.com/hutiefang76/skills-frank"
-readme = "README.md"
-keywords = ["cli", "ai", "skill", "mcp", "claude"]
-categories = ["command-line-utilities"]
 
-[[bin]]
-name = "frank"
-path = "src/main.rs"
-
-[lib]
-name = "frank"
-path = "src/lib.rs"
-
-# ---- 依赖 ----
-# 选型原则: 成熟、活跃、零系统依赖 (vendored), 最小化二进制体积
-[dependencies]
-
-# CLI 解析: derive 风格, 自动生成 help/version
-clap = { version = "4.6", features = ["derive", "env"] }
-
-# 序列化: manifest 解析 / state.json 读写
-# 注: 原 serde_yaml 已 archived (2024), 改用社区活跃 fork serde_yml (drop-in 兼容)
-serde = { version = "1.0", features = ["derive"] }
-serde_yml = "0.0.12"
-serde_json = "1.0"
-
-# 错误处理: anyhow 给上层 (CLI), thiserror 给库内错误类型定义
+# ---- 工作区共享依赖 (子 crate 用 `dep = { workspace = true }` 引用) ----
+# 仅放跨多个 crate 出现的依赖, 单 crate 专属的留在 crate 自己的 [dependencies]
+[workspace.dependencies]
 anyhow = "1.0"
 thiserror = "2.0"
-
-# 日志: 结构化, 支持 RUST_LOG 环境变量过滤
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "fs", "io-util", "net", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"] }
-
-# 终端着色: 自动处理 NO_COLOR / 重定向到文件时禁用
-owo-colors = { version = "4.2", features = ["supports-colors"] }
-
-# 表格输出: frank list 用
-tabled = "0.17"
-
-# 路径处理: 跨平台 home/config 目录定位
-dirs = "6.0"
-
-# 时间: snapshot 命名 / 同步时间戳
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-
-# Git 操作: vendored libgit2 + vendored openssl, 无系统依赖
-# P0 day3-4 启用: installer/git.rs 实现 clone/fetch/checkout
-# https + ssh: HTTPS clone (public skills) + 系统 ssh-agent (private skills)
-# vendored-openssl: 不依赖宿主机 libssl, 跨平台分发友好
-git2 = { version = "0.20", default-features = false, features = [
-    "vendored-libgit2",
-    "vendored-openssl",
-    "https",
-    "ssh",
-] }
-
-# SHA-256: cache 目录名哈希 (sha256(url) 前 16 字符), 保证跨设备一致
 sha2 = "0.10"
-
-# Hostname 获取: device_allowlist 校验; 比 std::env::var("HOSTNAME") 在 Windows 上更可靠
-gethostname = "0.5"
-
-[dev-dependencies]
-# 集成测试: 模拟 CLI 调用
-assert_cmd = "2.0"
-predicates = "3.1"
-# 临时目录: 测试用
 tempfile = "3.27"
 
-# ---- 编译配置 ----
+# ---- 编译配置 (workspace 级生效全部子 crate) ----
 [profile.release]
 opt-level = "z"      # 体积优先 (frank 不是 CPU 密集, 体积 > 速度)
 lto = true           # link-time optimization, 进一步压缩
@@ -87,27 +44,23 @@ panic = "abort"      # panic 直接 abort, 不展开栈 (省体积)
 [profile.dev]
 opt-level = 0        # 开发期不优化, 编译快
 
-# ---- Lint 配置 ----
-# clippy 严格度: pedantic 是次于 nursery 的最严级别
-# 项目要求: 代码结构清晰 (用户明确要求, 见 ADR-001)
-[lints.clippy]
+# ---- Lint 配置 (子 crate 用 `[lints] workspace = true` 继承) ----
+# ADR-001 质量基线: 全 crate 强制 pedantic + missing_docs + forbid unsafe
+[workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-# 允许的例外 (pedantic 太学究, 或与中文项目风格冲突的几条)
+# 允许的例外 (pedantic 太学究, 或与中文项目风格冲突)
 module_name_repetitions = "allow"
-missing_errors_doc = "allow"      # anyhow::Result 不强制写 # Errors 节
+missing_errors_doc = "allow"      # anyhow::Result 不强制 # Errors 节
 missing_panics_doc = "allow"
 doc_markdown = "allow"            # 中文文档里英文专有名词不强制反引号
 default_trait_access = "allow"    # 测试代码 Default::default() 更简洁
 must_use_candidate = "allow"      # 不是所有 getter 都要 #[must_use]
 needless_pass_by_value = "allow"  # clap Args 按值传符合惯例
-items_after_statements = "allow"  # 工具函数可以放在 use 后
-unnecessary_wraps = "allow"       # dispatcher 模式统一返回 Result<()>
+items_after_statements = "allow"  # 工具函数可放在 use 之后
+unnecessary_wraps = "allow"       # dispatcher 统一返回 Result<()>
 
-[lints.rust]
-# 注释完整 (用户明确要求, 见 ADR-001)
+[workspace.lints.rust]
 missing_docs = "warn"
-# 安全: 项目禁用 unsafe
 unsafe_code = "forbid"
-# 未使用警告升为错误 (避免代码腐烂)
 unused_imports = "warn"
 unused_variables = "warn"
