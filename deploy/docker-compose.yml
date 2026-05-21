@@ -1,22 +1,24 @@
-# frank-stack 服务端栈 (跑在 tx:8317)
+# frank-stack 服务端栈 (跑在 tx:8318)
 #
-# 当前包含 (P0):
-#   - caddy:   TLS 终止 + 反向代理 (唯一对外端口 8317)
-#   - qdrant:  vector DB, 内部 :6333 / :6334
+# 当前包含 (P0 + P2):
+#   - caddy:       TLS 终止 + 反向代理 (对外端口 8318 → 容器内 8317)
+#   - qdrant:      vector DB, 内部 :6333 / :6334
+#   - sync-agent:  frank Rust 服务端 (axum, /memory + /orchestrator), 内部 :3000
 #
-# 待加 (P1+):
-#   - sync-agent: frank Rust 服务端 (axum, /memory + /orchestrator)
+# 待加 (P6+):
 #   - postgres:   orchestrator job 持久化
 #
 # 资源预算 (tx 总 RAM 3.3G, 可用 ~1G):
-#   - caddy:  ~30 MB
-#   - qdrant: 限制 256 MB
-#   - 合计预算: < 300 MB
+#   - caddy:       ~30 MB    (limit 64 MB)
+#   - qdrant:      ~120 MB   (limit 256 MB)
+#   - sync-agent:  ~50 MB    (limit 128 MB)
+#   - 合计预算: < 500 MB
 #
 # 部署:
 #   cd /opt/frank
 #   docker compose up -d qdrant && curl -sf http://localhost:6333/healthz
-#   docker compose up -d caddy && curl -sfk https://localhost:8317/healthz
+#   docker compose up -d sync-agent && docker logs frank-sync-agent | tail -10
+#   docker compose up -d caddy && curl -sf http://localhost:8318/healthz
 
 networks:
   frank-net:
@@ -51,6 +53,38 @@ services:
       timeout: 5s
       retries: 3
 
+  sync-agent:
+    # 镜像由本机 docker buildx (linux/amd64) 构建, scp .tar 到 tx, docker load 进来后
+    # 直接以 image: 引用; tx 上不重 build (避免 OOM)。
+    # 重 build 时本地执行:
+    #   docker buildx build --platform linux/amd64 \
+    #     -f deploy/sync-agent.Dockerfile \
+    #     -t frank-sync-agent:0.1.0 \
+    #     --output type=docker,dest=/tmp/frank-sync-agent.tar .
+    image: frank-sync-agent:0.1.0
+    container_name: frank-sync-agent
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      FRANK_BIND_ADDR: 0.0.0.0:3000
+      FRANK_QDRANT_URL: http://qdrant:6334
+      # 注: collection 名跟 FRANK_MEMORY_MOCK 联动 — mock 用 16 维, prod 用 1536 维, 不能共用!
+      # mock=1 时强制 _mock 后缀, 防止切到真 key 后 prod 写入 16 维 collection 失败 (P2-4)
+      FRANK_COLLECTION: ${FRANK_COLLECTION:-frank_memories_mock_v1}
+      # mock 模式: 暂无 OpenAI / Anthropic key, 让服务能起来占位.
+      # 接入真 key 后:
+      #   1. FRANK_MEMORY_MOCK=0
+      #   2. FRANK_COLLECTION=frank_memories_v1 (不同 collection, 避免维度污染)
+      #   3. 通过 .env / secrets 注入 OPENAI_API_KEY + ANTHROPIC_API_KEY
+      FRANK_MEMORY_MOCK: "1"
+      RUST_LOG: "info,frank_memory=debug,frank_sync_agent=debug"
+    networks: [frank-net]
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    mem_limit: 128m
+
   caddy:
     image: caddy:2.10-alpine
     container_name: frank-caddy
@@ -61,8 +95,14 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    environment:
+      # /memory/* /orchestrator/* /qdrant/* 鉴权 token (X-Frank-Token header)
+      # 从 host /opt/frank/.secrets/api_token 读 (一次性生成, 600 权限)
+      FRANK_API_TOKEN: ${FRANK_API_TOKEN:?set in .env or via 'export FRANK_API_TOKEN=$(cat .secrets/api_token)'}
     networks: [frank-net]
     depends_on:
       qdrant:
         condition: service_healthy
+      sync-agent:
+        condition: service_started
     mem_limit: 64m

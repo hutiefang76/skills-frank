@@ -23,27 +23,58 @@
   }
 }
 
-:8317 {
-  # P0 暂用纯 HTTP, 接域名后改 `tls your.domain.com` 上 LE
-  # `tls internal` 在端口映射 (container:8317 → host:8318) 下证书 SAN 不匹配, 暂停用
+http://frank.hutiefang.com:8318, http://101.35.227.232:8318, :8317 {
+  # 三种访问入口都接:
+  #   1. http://frank.hutiefang.com:8318 (推荐, 需 DNS A 记录指向 101.35.227.232)
+  #   2. http://101.35.227.232:8318 (IP fallback)
+  #   3. 容器内 :8317 (健康探针)
+  #
+  # HTTPS: 8318 走 LE/ZeroSSL 需要 ACME challenge, 与现有 80/443 (1Panel) 冲突.
+  # 后续要 HTTPS 改走 1Panel 加 frank.hutiefang.com 的 443 反代 → http://tx:8318
 
   encode gzip zstd
 
-  # 健康探针 (本机 / Tencent CLB 用)
+  # 健康探针 (本机 / Tencent CLB 用), 不鉴权
   respond /healthz "ok" 200
 
-  # frank-sync-agent (axum REST + WebSocket)
-  # 当前 sync-agent 还没起, 这两行先注释; sync-agent 上线后开启
-  # reverse_proxy /memory/* sync-agent:3000
-  # reverse_proxy /orchestrator/* sync-agent:3000
+  # ─── 鉴权策略 ─────────────────────────────────────────────────────────
+  # /memory/* 与 /orchestrator/* 包含读/写/删, 公网暴露必须鉴权; 仅 healthz 例外.
+  # token 注入: docker-compose 把 FRANK_API_TOKEN 通过 env 传给 Caddy 容器, Caddyfile
+  # 在加载时用 {$FRANK_API_TOKEN} 占位符内插. 容器外用 /opt/frank/.secrets/api_token 持久化.
 
-  # Qdrant 管理 / API (Path strip: /qdrant/foo → /foo)
-  handle_path /qdrant/* {
-    reverse_proxy qdrant:6333
+  @memory_healthz path /memory/healthz
+  @sync_protected {
+    path /memory/* /orchestrator/*
+    not path /memory/healthz
+  }
+
+  # healthz 直放 (探活, 公网友好)
+  handle @memory_healthz {
+    reverse_proxy sync-agent:3000
+  }
+
+  # 受保护路由: 必须带 X-Frank-Token, 否则 401
+  handle @sync_protected {
+    @authorized header X-Frank-Token "{$FRANK_API_TOKEN}"
+    handle @authorized {
+      reverse_proxy sync-agent:3000
+    }
+    respond "missing or invalid X-Frank-Token header" 401
+  }
+
+  # Qdrant 管理 / API (Path strip: /qdrant/foo → /foo). 同样要 token (含数据库写权限!)
+  handle /qdrant/* {
+    @qdrant_authorized header X-Frank-Token "{$FRANK_API_TOKEN}"
+    handle @qdrant_authorized {
+      handle_path /qdrant/* {
+        reverse_proxy qdrant:6333
+      }
+    }
+    respond "missing or invalid X-Frank-Token header" 401
   }
 
   # 默认 placeholder (后续放 orchestrator web SPA)
-  respond / "frank-stack alive. routes: /healthz /qdrant/*  (memory/orchestrator pending sync-agent)" 200
+  respond / "frank-stack alive. routes: /healthz /qdrant/* /memory/* /orchestrator/*" 200
 
   log {
     output stdout

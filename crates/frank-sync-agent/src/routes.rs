@@ -3,7 +3,8 @@
 //! # 路由清单 (v1)
 //!
 //! ```text
-//! GET    /healthz                     存活探针
+//! GET    /healthz                     存活探针 (顶层)
+//! GET    /memory/healthz              存活探针 (memory 子前缀, 便于 Caddy /memory/* 反代统一测)
 //! POST   /memory/add                  添加记忆 (LLM 抽取多条 fact)
 //! POST   /memory/add_raw              添加单条已成型 fact (跳过 LLM)
 //! POST   /memory/search               按 query 检索
@@ -33,6 +34,7 @@ use crate::state::AppState;
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/memory/healthz", get(healthz))
         .route("/memory/add", post(memory_add))
         .route("/memory/add_raw", post(memory_add_raw))
         .route("/memory/search", post(memory_search))

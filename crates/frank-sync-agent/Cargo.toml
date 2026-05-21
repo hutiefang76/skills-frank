@@ -33,5 +33,8 @@ tower-http = { version = "0.6", features = ["trace", "cors", "timeout"] }
 # Path extractor 需要 Uuid 类型实现 (axum 通过 serde 解码)
 uuid = { version = "1.23", features = ["v4", "serde"] }
 
+# async-trait 用于 mock embedder/extractor 实现 frank-memory 的 trait (#[async_trait])
+async-trait = "0.1"
+
 [lints]
 workspace = true

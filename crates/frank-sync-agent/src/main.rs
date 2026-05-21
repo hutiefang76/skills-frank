@@ -17,6 +17,7 @@ use std::net::SocketAddr;
 use anyhow::{Context, Result};
 use tracing_subscriber::EnvFilter;
 
+mod mock;
 mod routes;
 mod state;
 
