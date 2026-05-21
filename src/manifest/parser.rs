@@ -48,9 +48,7 @@ pub fn discover() -> Result<Vec<Manifest>> {
     // 2. 用户私有 manifests (~/.frank/manifests/*.yaml)
     if let Some(dir) = user_manifest_dir() {
         if dir.exists() {
-            for entry in
-                fs::read_dir(&dir).with_context(|| format!("read {}", dir.display()))?
-            {
+            for entry in fs::read_dir(&dir).with_context(|| format!("read {}", dir.display()))? {
                 let entry = entry?;
                 let path = entry.path();
                 if path.extension().is_some_and(|e| e == "yaml" || e == "yml") {
@@ -102,9 +100,10 @@ fn built_in_public_path() -> Option<PathBuf> {
         return Some(cargo_path);
     }
     // 安装后
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("..").join("manifest").join("public.yaml")))
+    std::env::current_exe().ok().and_then(|p| {
+        p.parent()
+            .map(|d| d.join("..").join("manifest").join("public.yaml"))
+    })
 }
 
 /// 用户私有 manifest 目录: `~/.frank/manifests/`。
@@ -138,7 +137,10 @@ skills:
         let m2: Manifest = serde_yml::from_str(yaml2).unwrap();
         let merged = merge(vec![m1, m2]);
         assert_eq!(merged.len(), 1);
-        assert!(matches!(merged[0].visibility, crate::manifest::schema::Visibility::Private));
+        assert!(matches!(
+            merged[0].visibility,
+            crate::manifest::schema::Visibility::Private
+        ));
     }
 
     #[test]

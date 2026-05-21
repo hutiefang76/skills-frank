@@ -1,10 +1,16 @@
-//! 本地状态管理: state.json + snapshots。
+//! 本地状态管理: `state.json` 持久化已安装 skills 的记录。
 //!
-//! P0 day1 状态: 模块占位, 数据结构与持久化实现待 day3-4。
+//! # 文件布局
 //!
-//! # 设计要点
+//! - `state.json` — `~/.frank/state.json`, 已安装/启用清单 (本模块)
+//! - `snapshots/` — `~/.frank/snapshots/<ts>/`, 操作前快照 (P1 实现)
 //!
-//! - state.json 位于 `~/.frank/state.json`, 单进程访问 (file lock)
-//! - 每次 install/uninstall/update 前自动建 snapshot 到 `~/.frank/snapshots/<ts>/`
-//! - snapshot 保留最近 N 份, 旧的自动清理 (默认 N=10)
-//! - 详见 docs/DESIGN.md §7.4.4
+//! # 子模块
+//!
+//! - [`store`] — [`StateData`] / [`SkillState`] / [`State`] 数据结构 + 原子读写
+//!
+//! `snapshot` 子模块预留给 P1 rollback。
+
+pub mod store;
+
+pub use store::{default_path, SkillState, State, StateData};

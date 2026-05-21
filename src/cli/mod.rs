@@ -3,7 +3,7 @@
 //! # 设计
 //!
 //! 用 `clap` derive 风格定义命令树 (类似 Java picocli 的注解风格)。
-//! 每个子命令一个文件 (`install.rs`, `list.rs` 等), 通过 [`Commands`] 枚举聚合,
+//! 每个子命令一个文件 (`install.rs`, `list.rs` 等), 通过私有 `Commands` 枚举聚合,
 //! 在 [`run`] 函数里 dispatch。
 //!
 //! 这种结构的好处:
@@ -14,9 +14,12 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-// 各子命令模块声明 (P0 day1-2: install / list 已落地, 其余占位)
+// 各子命令模块声明 (P0 day3-4: install / uninstall / enable / disable / list 已落地)
+pub mod disable;
+pub mod enable;
 pub mod install;
 pub mod list;
+pub mod uninstall;
 
 /// frank — AI 工具链治理平台 CLI。
 ///
@@ -52,13 +55,16 @@ enum Commands {
     /// 列出已知的 skills (表格输出, 支持 --profile 过滤)。
     List(list::Args),
 
-    // ----- 以下为占位, P0 后续 day 实现 -----
-    /// 卸载 (P0 待实现)。
-    Uninstall,
-    /// 启用一个已安装的 skill (P0 待实现)。
-    Enable,
-    /// 禁用一个已安装的 skill (P0 待实现)。
-    Disable,
+    /// 卸载: 从三平台移除链接 + 删 state 记录 (保留 cache)。
+    Uninstall(uninstall::Args),
+
+    /// 启用: 重建已 disabled 的链接。
+    Enable(enable::Args),
+
+    /// 禁用: 移除链接但保留 state (与 uninstall 区别: 可一键恢复)。
+    Disable(disable::Args),
+
+    // ----- 以下为占位, P1 实现 -----
     /// 升级到最新版本 (P1 待实现)。
     Update,
     /// 回滚到上一个 snapshot (P1 待实现)。
@@ -78,9 +84,9 @@ pub fn run() -> Result<()> {
     match cli.command {
         Commands::Install(args) => install::run(args),
         Commands::List(args) => list::run(args),
-        Commands::Uninstall => stub("uninstall"),
-        Commands::Enable => stub("enable"),
-        Commands::Disable => stub("disable"),
+        Commands::Uninstall(args) => uninstall::run(args),
+        Commands::Enable(args) => enable::run(args),
+        Commands::Disable(args) => disable::run(args),
         Commands::Update => stub("update"),
         Commands::Rollback => stub("rollback"),
         Commands::Doctor => stub("doctor"),

@@ -52,9 +52,22 @@ dirs = "6.0"
 # 时间: snapshot 命名 / 同步时间戳
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 
-# Git 操作: vendored libgit2, 无系统依赖
-# P0 暂时不开启, 等 installer 用到再启用以减少首次编译时间
-# git2 = { version = "0.18", default-features = false, features = ["vendored-libgit2"] }
+# Git 操作: vendored libgit2 + vendored openssl, 无系统依赖
+# P0 day3-4 启用: installer/git.rs 实现 clone/fetch/checkout
+# https + ssh: HTTPS clone (public skills) + 系统 ssh-agent (private skills)
+# vendored-openssl: 不依赖宿主机 libssl, 跨平台分发友好
+git2 = { version = "0.20", default-features = false, features = [
+    "vendored-libgit2",
+    "vendored-openssl",
+    "https",
+    "ssh",
+] }
+
+# SHA-256: cache 目录名哈希 (sha256(url) 前 16 字符), 保证跨设备一致
+sha2 = "0.10"
+
+# Hostname 获取: device_allowlist 校验; 比 std::env::var("HOSTNAME") 在 Windows 上更可靠
+gethostname = "0.5"
 
 [dev-dependencies]
 # 集成测试: 模拟 CLI 调用

@@ -28,12 +28,11 @@ static INIT: Once = Once::new();
 /// ```
 pub fn init() {
     INIT.call_once(|| {
-        let filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("warn"));
+        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
 
         tracing_subscriber::fmt()
             .with_env_filter(filter)
-            .with_target(false)       // 不打印 module path, 给用户看够清爽
+            .with_target(false) // 不打印 module path, 给用户看够清爽
             .with_level(true)
             .with_ansi(std::io::stderr().is_terminal())
             .with_writer(std::io::stderr)

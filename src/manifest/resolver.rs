@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn by_profile_filters_correctly() {
         let r = Registry::new(vec![
-            s("a", None),                 // 默认 personal
+            s("a", None), // 默认 personal
             s("b", Some("personal")),
             s("c", Some("company")),
         ]);
