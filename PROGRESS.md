@@ -1,8 +1,8 @@
 # Frank 进度记录
 
-> **当前状态**：P0 Sprint Day 2 完成 ✅ · `frank list` 端到端跑通
+> **当前状态**：P0 Sprint Day 3-4 完成 ✅ · `frank install/uninstall/enable/disable/list` 全端到端跑通 (macOS)
 > **日期**：2026-05-21
-> **下次开工**：P0 Day 3-4 (installer + 三平台 adapter)
+> **下次开工**：P0 Day 5 (验收 + CI smoke matrix + v0.1.0 tag); 或先 P1 (update/rollback/doctor)
 > **GitHub**：[github.com/hutiefang76/skills-frank](https://github.com/hutiefang76/skills-frank) · main = `clippy 0-warning + 真跑通`
 
 ---
@@ -75,20 +75,40 @@
 - [x] clippy --all-features -- -D warnings 0 warning ✅
 - [x] CI 标准达成
 
-## 📋 Day 3-5 待办（P0 Sprint）
+## ✅ Day 3-4 完成 (commit 待提)
 
-### Day 3-4 — installer + adapter
-- [ ] `src/installer/git.rs` 用 `git2` 实现 sparse-checkout + subpath
-- [ ] `src/installer/junction.rs` Windows mklink /J
-- [ ] `src/installer/symlink.rs` Unix symlink
-- [ ] `src/installer/credentials.rs` keychain 读凭据
-- [ ] `src/adapter/{claude,codex,opencode}.rs` 三平台实现
-- [ ] `src/state/store.rs` state.json 读写 + 文件锁
-- [ ] `src/state/snapshot.rs` 备份/回滚
+### installer + adapter + state + CLI 全套
+- [x] `src/state/store.rs` — StateData/SkillState + 原子写 (tmp+rename) + load/save/get/put/remove/iter (5 单测)
+- [x] `src/installer/git.rs` — `git2` clone/fetch/checkout + sha256(url) 前 16 字符 cache key + `ProxyOptions::auto()` (3 单测)
+- [x] `src/installer/link.rs` — 跨平台 symlink (unix) / symlink_dir (win) + 幂等 remove (4 单测)
+- [x] `src/installer/install.rs` — 编排器: device_allowlist → fetch → 拼 subpath → adapter 分发 → 失败回滚 + `uninstall_skill` 聚合错误
+- [x] `src/adapter/{claude,codex,opencode}.rs` — 3 个 unit struct 共享 link_install/link_uninstall/link_verify helper (2 单测)
+- [x] `src/cli/install.rs` — 重写: manifest → install_skill → state.put → ui::success
+- [x] `src/cli/uninstall.rs` / `enable.rs` / `disable.rs` — 新增, 与 state 协同 (enable 幂等)
+- [x] `src/cli/list.rs` — `--installed` 真接通, 新增 status 列 (enabled/disabled/-)
+- [x] Cargo.toml — `git2` 启用 vendored-libgit2 + vendored-openssl + https + ssh; 新增 `sha2 0.10` / `gethostname 0.5`
 
-### Day 5 — 验收
-- [ ] `frank install doris-ops` 三平台真测
-- [ ] CI 三平台 smoke matrix 跑通
+### 验收数据 (macOS Darwin 25.4 真跑)
+- ✅ `cargo test --all-features` 20/20 通过
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` 0 warning
+- ✅ `RUSTDOCFLAGS=-D warnings cargo doc --no-deps --all-features` 0 warning
+- ✅ CI secret-scan 本地复跑 0 命中
+- ✅ `frank install probe-hello` (octocat/Hello-World 真仓) 3 平台 symlink + state.json + cache 全到位 (~5s)
+- ✅ `frank disable / enable` 链路对称, link 增删正确, state.enabled 切换正确
+- ✅ `frank uninstall` link 清干净, state 移除, cache 保留供复用
+- ✅ `frank list --installed` 真过滤, status 列正确显示
+
+### 不在范围 / 推后
+- snapshot/rollback → P1
+- credentials/keychain → 等 kdwl 私有 skill (own-public 不需要)
+- health_check 跑命令 → schema 已就位, P1
+- slash_command 渲染 → P1
+- Windows junction (mklink /J) fallback → symlink_dir 覆盖 win10+ 开发者模式, 真踩到再加
+- frank update/rollback/doctor → P1
+
+## 📋 Day 5 待办（P0 收尾）
+- [ ] CI 三平台 smoke matrix 真跑通 (Linux/Win/macOS — ubuntu 已 clippy 过, 缺 Windows symlink 实测)
+- [ ] manifest 里 7 个公开 skill 仓 push 到 GitHub (现在 url 还是 404, 跑不动真测)
 - [ ] 第一次 `v0.1.0` tag → release.yml 跨平台构建
 
 ---
