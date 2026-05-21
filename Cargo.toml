@@ -1,0 +1,93 @@
+[package]
+name = "frank"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["hutiefang <hutiefang@icloud.com>"]
+description = "AI toolchain governance platform: unified skill/MCP management across Claude Code, codex, opencode"
+license = "MIT"
+repository = "https://github.com/hutiefang76/skills-frank"
+readme = "README.md"
+keywords = ["cli", "ai", "skill", "mcp", "claude"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "frank"
+path = "src/main.rs"
+
+[lib]
+name = "frank"
+path = "src/lib.rs"
+
+# ---- 依赖 ----
+# 选型原则: 成熟、活跃、零系统依赖 (vendored), 最小化二进制体积
+[dependencies]
+
+# CLI 解析: derive 风格, 自动生成 help/version
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# 序列化: manifest 解析 / state.json 读写
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+
+# 错误处理: anyhow 给上层 (CLI), thiserror 给库内错误类型定义
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 日志: 结构化, 支持 RUST_LOG 环境变量过滤
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"] }
+
+# 终端着色: 自动处理 NO_COLOR / 重定向到文件时禁用
+owo-colors = { version = "4.0", features = ["supports-colors"] }
+
+# 表格输出: frank list 用
+tabled = "0.15"
+
+# 路径处理: 跨平台 home/config 目录定位
+dirs = "5.0"
+
+# 时间: snapshot 命名 / 同步时间戳
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+
+# Git 操作: vendored libgit2, 无系统依赖
+# P0 暂时不开启, 等 installer 用到再启用以减少首次编译时间
+# git2 = { version = "0.18", default-features = false, features = ["vendored-libgit2"] }
+
+[dev-dependencies]
+# 集成测试: 模拟 CLI 调用
+assert_cmd = "2.0"
+predicates = "3.0"
+# 临时目录: 测试用
+tempfile = "3.10"
+
+# ---- 编译配置 ----
+[profile.release]
+opt-level = "z"      # 体积优先 (frank 不是 CPU 密集, 体积 > 速度)
+lto = true           # link-time optimization, 进一步压缩
+codegen-units = 1    # 单元更少 = 更激进优化
+strip = "symbols"    # 移除符号信息
+panic = "abort"      # panic 直接 abort, 不展开栈 (省体积)
+
+[profile.dev]
+opt-level = 0        # 开发期不优化, 编译快
+
+# ---- Lint 配置 ----
+# clippy 严格度: pedantic 是次于 nursery 的最严级别
+# 项目要求: 代码结构清晰 (用户明确要求, 见 ADR-001)
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# 允许的例外 (pedantic 太学究的几条)
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"  # anyhow::Result 不强制写 Errors 节
+missing_panics_doc = "allow"
+
+[lints.rust]
+# 注释完整 (用户明确要求, 见 ADR-001)
+missing_docs = "warn"
+# 安全: 项目禁用 unsafe
+unsafe_code = "forbid"
+# 未使用警告升为错误 (避免代码腐烂)
+unused_imports = "warn"
+unused_variables = "warn"

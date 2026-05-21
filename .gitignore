@@ -1,0 +1,42 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+# 注: Cargo.lock 入仓 (frank 是 application, 保证构建可复现)
+
+# 私有 manifest (本地, 含公司 skills 地址 - 严禁入仓)
+manifest/private.yaml
+manifest/private-*.yaml
+~/.frank/
+
+# 凭据 (任何形式)
+credentials.ini
+*.pem
+*.key
+*.p12
+
+# IDE - 共享 RustRover/IDEA run config + code style, 排除私人设置
+.idea/*
+!.idea/runConfigurations/
+!.idea/codeStyles/
+!.idea/inspectionProfiles/
+!.idea/vcs.xml
+!.idea/.gitignore
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 测试产物
+/tmp/
+test-output/
+
+# AI 工具产物
+.aider*
+.claude/

@@ -1,0 +1,23 @@
+# frank-cli rustfmt 配置
+# 目标: 代码结构清晰 (ADR-001 质量基线)
+
+edition = "2021"
+max_width = 100              # 略宽于默认 100, 便于 anyhow::Result 等长签名
+hard_tabs = false
+tab_spaces = 4
+
+# 导入分组与排序
+imports_granularity = "Crate"  # 同一 crate 的 import 合并 (stable feature)
+group_imports = "StdExternalCrate"  # std → 第三方 → 本地
+
+# 字符串
+format_strings = false       # 不强制把长字符串拆行 (保可读)
+
+# 函数
+fn_single_line = false       # 不允许单行函数 (统一多行可读)
+brace_style = "SameLineWhere"
+
+# 注释
+wrap_comments = false        # 不自动换行注释 (避免破坏 Markdown 表格)
+normalize_comments = true
+comment_width = 100

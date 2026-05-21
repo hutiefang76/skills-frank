@@ -1,0 +1,177 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v0.1.0)"
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: frank
+
+jobs:
+  # ---- 三平台 × 多架构 build ----
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
+            cross: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            archive_ext: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (for aarch64 linux)
+        if: matrix.cross
+        run: cargo install cross --locked
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release
+        shell: bash
+        run: |
+          if [[ "${{ matrix.cross }}" == "true" ]]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          NAME=${{ env.BIN_NAME }}-${GITHUB_REF_NAME}-${{ matrix.target }}
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ env.BIN_NAME }} dist/
+          cp README.md LICENSE 2>/dev/null || true
+          cd dist
+          tar -czf ../${NAME}.tar.gz ${{ env.BIN_NAME }} README.md LICENSE 2>/dev/null || tar -czf ../${NAME}.tar.gz ${{ env.BIN_NAME }}
+          cd ..
+          shasum -a 256 ${NAME}.tar.gz > ${NAME}.tar.gz.sha256
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $name = "${{ env.BIN_NAME }}-$env:GITHUB_REF_NAME-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe" dist\
+          Copy-Item README.md dist\ -ErrorAction SilentlyContinue
+          Compress-Archive -Path dist\* -DestinationPath "$name.zip"
+          (Get-FileHash "$name.zip" -Algorithm SHA256).Hash | Out-File "$name.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}-${{ matrix.target }}
+          path: |
+            ${{ env.BIN_NAME }}-*.tar.gz
+            ${{ env.BIN_NAME }}-*.zip
+            ${{ env.BIN_NAME }}-*.sha256
+
+  # ---- 汇总产物 + 发 GitHub Release ----
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec cp {} release-files/ \;
+          ls -la release-files/
+
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          {
+            echo 'CHANGELOG<<EOF'
+            git log --pretty=format:'- %s (%h)' $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null)..HEAD || git log --pretty=format:'- %s (%h)' -20
+            echo
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          body: |
+            ## ${{ github.ref_name }}
+
+            **下载** (选对应平台):
+            - Linux x86_64: `frank-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz`
+            - Linux ARM64: `frank-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz`
+            - macOS Intel: `frank-${{ github.ref_name }}-x86_64-apple-darwin.tar.gz`
+            - macOS Apple Silicon: `frank-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz`
+            - Windows x64: `frank-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip`
+            - Windows ARM64: `frank-${{ github.ref_name }}-aarch64-pc-windows-msvc.zip`
+
+            每个产物配套 `.sha256` 校验文件。
+
+            ## Changes
+
+            ${{ steps.changelog.outputs.CHANGELOG }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # ---- 发布到 crates.io (可选, 需配 CARGO_REGISTRY_TOKEN secret) ----
+  publish-crates:
+    name: Publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref_name, '-') }} # 仅正式版本
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::warning::CARGO_REGISTRY_TOKEN not set, skip crates.io publish"
+            exit 0
+          fi
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"
+        continue-on-error: true

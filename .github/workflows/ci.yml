@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # 限制并行编译, 避免 GitHub runner OOM
+  CARGO_BUILD_JOBS: 2
+
+jobs:
+  # ---- 快速检查 (fmt + clippy + check), 失败立刻 fail-fast ----
+  lint:
+    name: Lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (strict, deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: cargo check (all targets)
+        run: cargo check --all-targets --all-features
+
+  # ---- 三平台测试矩阵 ----
+  test:
+    name: Test (${{ matrix.os }})
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo test
+        run: cargo test --workspace --all-features -- --nocapture
+
+  # ---- 文档构建 (验证 doc comments 无错) ----
+  docs:
+    name: cargo doc
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build docs (treat warnings as errors)
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  # ---- 安全审计 (依赖漏洞) ----
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit || true
+      - name: Run audit
+        run: cargo audit
+        continue-on-error: true # 暂不强制, 仅作信号
+
+  # ---- 公司 skills 内网信息泄露扫描 ----
+  # 防止公司 skill 引用 / 内网 IP 误入公开仓
+  secret-scan:
+    name: Internal IP / secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan for internal IPs (10.0.* / 10.89.* / 10.90.*)
+        run: |
+          # 仅扫公开 repo 内文件, 排除 docs/ 中合法引用 (设计文档说明可能含 IP)
+          ! grep -rnE '10\.(0|89|90)\.[0-9]+\.[0-9]+' \
+              --exclude-dir=target \
+              --exclude-dir=docs \
+              --exclude=.gitignore \
+              --include='*.rs' --include='*.toml' --include='*.yaml' --include='*.yml' .
+      - name: Scan for hardcoded credentials
+        run: |
+          # 简单正则, 真实项目可换 gitleaks
+          ! grep -rnE '(password|passwd|secret|api[_-]?key)\s*[:=]\s*["'"'"'][^"'"'"']{6,}' \
+              --exclude-dir=target --exclude-dir=docs \
+              --include='*.rs' --include='*.toml' --include='*.yaml' --include='*.yml' .

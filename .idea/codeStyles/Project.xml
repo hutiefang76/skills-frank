@@ -1,0 +1,10 @@
+<component name="ProjectCodeStyleConfiguration">
+  <code_scheme name="Project" version="173">
+    <option name="LINE_SEPARATOR" value="&#10;" />
+    <option name="RIGHT_MARGIN" value="100" />
+    <RustCodeStyleSettings>
+      <option name="ALIGN_RET_ABOVE_LBRACE" value="false" />
+      <option name="ALLOW_ONE_LINE_MATCH" value="false" />
+    </RustCodeStyleSettings>
+  </code_scheme>
+</component>
