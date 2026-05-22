@@ -35,10 +35,12 @@ const DEFAULT_TIMEOUT_SECS: u64 = 15;
 
 /// frank-sync-agent HTTP 客户端。
 ///
-/// 持有 base_url + 复用的 reqwest blocking client。
+/// 持有 base_url + 复用的 reqwest blocking client + 可选鉴权 token。
+/// sync-agent 在 Caddy 层强制 `X-Frank-Token` header 校验, 客户端不带 token 会 401。
 pub struct SyncClient {
     base_url: String,
     http: reqwest::blocking::Client,
+    token: Option<String>,
 }
 
 impl SyncClient {
@@ -52,12 +54,28 @@ impl SyncClient {
         Ok(Self {
             base_url: normalize(&base_url.into()),
             http,
+            token: None,
         })
     }
 
-    /// 用环境/配置/缺省顺序解析 base_url 后构造。
+    /// 设置 X-Frank-Token 鉴权头 (后续所有 request 自动带上)。
+    #[must_use]
+    pub fn with_token(mut self, token: impl Into<String>) -> Self {
+        self.token = Some(token.into());
+        self
+    }
+
+    /// 用环境/配置/缺省顺序解析 base_url + 鉴权 token 后构造。
+    ///
+    /// Token 来源 (按优先级):
+    /// 1. 环境变量 `FRANK_API_TOKEN`
+    /// 2. `~/.frank/.token` 文件 (单行明文, 600 权限推荐)
     pub fn from_env_or_config() -> Result<Self> {
-        Self::new(resolve_base_url(config_path().ok().as_deref()))
+        let mut client = Self::new(resolve_base_url(config_path().ok().as_deref()))?;
+        if let Some(t) = resolve_token() {
+            client = client.with_token(t);
+        }
+        Ok(client)
     }
 
     /// 返回当前生效的 base URL (便于诊断打印)。
@@ -73,6 +91,7 @@ impl SyncClient {
     }
 
     /// GET /healthz — 探活。返回服务端的纯文本响应 (期望 "ok")。
+    /// healthz 不鉴权, 不带 token。
     pub fn healthz(&self) -> Result<String> {
         let url = format!("{}/healthz", self.base_url);
         let resp = self
@@ -148,11 +167,11 @@ impl SyncClient {
     /// GET /memory/:id — 取单条。服务端返回 `Option<MemoryRecord>`, None 表示找不到。
     pub fn get(&self, id: &MemoryId) -> Result<Option<MemoryRecord>> {
         let url = format!("{}/memory/{}", self.base_url, id);
-        let resp = self
-            .http
-            .get(&url)
-            .send()
-            .with_context(|| format!("GET {url}"))?;
+        let mut req = self.http.get(&url);
+        if let Some(t) = &self.token {
+            req = req.header("X-Frank-Token", t);
+        }
+        let resp = req.send().with_context(|| format!("GET {url}"))?;
         let status = resp.status();
         let text = resp.text().context("read get body")?;
         if !status.is_success() {
@@ -166,11 +185,11 @@ impl SyncClient {
     /// DELETE /memory/:id — 删除。成功返回 204, 这里就吞掉 status。
     pub fn delete(&self, id: &MemoryId) -> Result<()> {
         let url = format!("{}/memory/{}", self.base_url, id);
-        let resp = self
-            .http
-            .delete(&url)
-            .send()
-            .with_context(|| format!("DELETE {url}"))?;
+        let mut req = self.http.delete(&url);
+        if let Some(t) = &self.token {
+            req = req.header("X-Frank-Token", t);
+        }
+        let resp = req.send().with_context(|| format!("DELETE {url}"))?;
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().unwrap_or_default();
@@ -187,18 +206,34 @@ impl SyncClient {
         body: &B,
     ) -> Result<R> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .http
-            .post(&url)
-            .json(body)
-            .send()
-            .with_context(|| format!("POST {url}"))?;
+        let mut req = self.http.post(&url).json(body);
+        if let Some(t) = &self.token {
+            req = req.header("X-Frank-Token", t);
+        }
+        let resp = req.send().with_context(|| format!("POST {url}"))?;
         let status = resp.status();
         let text = resp.text().context("read response body")?;
         if !status.is_success() {
             return Err(extract_error(status, &text));
         }
         serde_json::from_str(&text).with_context(|| format!("decode response from {path}"))
+    }
+}
+
+/// Token 解析: env `FRANK_API_TOKEN` → `~/.frank/.token` 文件。
+fn resolve_token() -> Option<String> {
+    if let Ok(t) = std::env::var("FRANK_API_TOKEN") {
+        if !t.trim().is_empty() {
+            return Some(t.trim().to_string());
+        }
+    }
+    let path = dirs::home_dir()?.join(".frank").join(".token");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 

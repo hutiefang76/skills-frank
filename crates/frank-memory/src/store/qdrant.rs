@@ -164,16 +164,20 @@ impl MemoryStore for QdrantStore {
 
 /// 把 `Scope` 三字段转成 Qdrant 必须条件 (must = AND)。
 /// 全 `None` 时返回 `None` (无过滤)。
+///
+/// **Payload key 用 dot-notation** — `MemoryRecord` serde 后 `scope` 是嵌套对象,
+/// Qdrant 走 `scope.user_id` / `scope.agent_id` / `scope.session_id` 取值。早期版本
+/// 用了顶层 `user_id` 等导致 list/search filter 全部漏命中 (codex review + 真测确认).
 fn scope_to_filter(scope: &Scope) -> Option<Filter> {
     let mut conditions: Vec<Condition> = Vec::new();
     if let Some(u) = &scope.user_id {
-        conditions.push(Condition::matches("user_id", u.clone()));
+        conditions.push(Condition::matches("scope.user_id", u.clone()));
     }
     if let Some(a) = &scope.agent_id {
-        conditions.push(Condition::matches("agent_id", a.clone()));
+        conditions.push(Condition::matches("scope.agent_id", a.clone()));
     }
     if let Some(s) = &scope.session_id {
-        conditions.push(Condition::matches("session_id", s.clone()));
+        conditions.push(Condition::matches("scope.session_id", s.clone()));
     }
     if conditions.is_empty() {
         None
