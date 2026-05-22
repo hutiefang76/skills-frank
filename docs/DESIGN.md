@@ -299,7 +299,7 @@
 | **manifest** | 描述 skill/MCP 元数据的 YAML 文件，含 source/visibility/auth/profile |
 | **adapter** | 把通用 skill 渲染成三平台各自格式的转换器 |
 | **profile** | 一组 manifest 的集合，按身份（personal/company）或设备分组 |
-| **visibility** | 三档：`public`（公开仓） · `own-public`（自研开源） · `private`（公司/私有） |
+| **visibility** | v0.2 两层 5 档：**frank 内置** (`frank-own` 芳哥自研, `frank-recommended` 芳哥推荐) + **用户自定义** (`user-public` 用户开源, `user-company` 用户公司, `user-private` 用户私有)。v0.1 三档 `public`/`own-public`/`private` 通过 serde alias 兼容 |
 | **device-allowlist** | manifest 项可指定只在特定 hostname 设备生效 |
 | **snapshot** | 操作前的状态快照，含三平台 skills 目录 + state.json |
 | **sync-agent** | 跑在腾讯云的 Go HTTP 服务，承担四类记忆存储 |

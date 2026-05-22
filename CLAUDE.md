@@ -59,7 +59,17 @@ Modules:
 2. `~/.frank/manifests/*.{yaml,yml}` (user private; **company skills live here, never in the repo**)
 3. `$FRANK_EXTRA_MANIFEST` (single file, for tests / CI)
 
-Three `Visibility` tiers drive auth and CI behaviour: `public` (HTTPS clone, no creds) → `own-public` (HTTPS/SSH, optional PAT) → `private` (SSH only, keychain required, must not appear in this public repo).
+**Visibility — 两层 5 档** (v0.2):
+
+- **Layer 1: frank 内置** (项目作者 hutiefang76 维护, 装 frank 默认就有)
+  - `frank-own` — 芳哥自研开源 skills
+  - `frank-recommended` — 芳哥推荐的 upstream / 第三方 (如 anthropics/*)
+- **Layer 2: 用户自定义** (用户自己 manifest 加, 跟项目作者无关 — `user-company` 是**用户的公司** 不是 frank 项目的)
+  - `user-public` — 用户的开源 skills
+  - `user-company` — 用户的公司 skills (严禁混入本仓 — 走 `~/.frank/manifests/`)
+  - `user-private` — 用户的私有 skills
+
+老 v0.1 `public` / `own-public` / `private` 通过 `#[serde(alias)]` 兼容老 manifest, 不破任何老配置。
 
 ## Quality baselines (ADR-001 — non-negotiable)
 

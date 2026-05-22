@@ -8,10 +8,35 @@
 
 Frank 是一个 CLI 工具，帮你在多台设备 + 多个 AI CLI 之间统一管理：
 
-- **skills**（公共 / 自研 / 公司三类来源）
+- **skills**(见下方 "Skills 两层 5 档分类")
 - **MCP servers**
 - **CLAUDE.md 规则同步**
 - **分布式记忆 + 调用统计**(自建 Docker stack: qdrant + caddy + frank-sync-agent,跑在腾讯云 VM)
+
+### Skills 两层 5 档分类
+
+frank 治理两种来源的 skills:
+
+**Layer 1 — frank 内置(项目作者维护,装 frank 默认就有):**
+
+| visibility | 含义 | 维护者 |
+|---|---|---|
+| `frank-own` | **芳哥自研** — frank 项目作者 (hutiefang76) 自己写的开源 skills | 项目作者 |
+| `frank-recommended` | **芳哥推荐** — 项目作者推荐的 upstream / 第三方 skills (如 anthropics/*) | 项目作者列名单 |
+
+→ 装 frank 立刻就有这两类(`frank list` 默认展示),一键 install。
+
+**Layer 2 — 用户自定义(用户自己 manifest 加,跟项目作者无关):**
+
+| visibility | 含义 |
+|---|---|
+| `user-public` | 用户自己开源的 skills (公开 git URL) |
+| `user-company` | 用户**自己公司**的 skills (跟 frank 项目方无关,严禁混入本仓!放 `~/.frank/manifests/`) |
+| `user-private` | 用户自己机密的 skills (个人凭据) |
+
+→ 放在 `~/.frank/manifests/*.yaml`,frank 启动时自动合并。
+
+> v0.1 老 `public` / `own-public` / `private` 通过 serde alias 兼容,不破老配置。
 
 ## 核心特性
 

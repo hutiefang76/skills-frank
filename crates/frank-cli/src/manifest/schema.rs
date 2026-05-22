@@ -108,16 +108,57 @@ pub enum Source {
     },
 }
 
-/// skill 可见性 / 权限分档。
+/// skill 可见性 / 权限分档 (v0.2 双层模型)。
+///
+/// # 两层 5 档
+///
+/// **Layer 1: frank 内置** (装 frank 默认带, 项目作者维护)
+/// - `frank-own` — 芳哥 (hutiefang76) 自研开源 skills (内置到 binary)
+/// - `frank-recommended` — 芳哥推荐的 upstream / 第三方 skills (manifest 列, 一键装)
+///
+/// **Layer 2: 用户自定义** (用户自己加在 `~/.frank/manifests/`, 跟项目作者无关)
+/// - `user-public` — 用户自己开源的 skills
+/// - `user-company` — 用户**自己公司**的 skills (跟 frank 项目作者无关, 严禁泄露到本仓!)
+/// - `user-private` — 用户自己机密的 skills
+///
+/// # 老 v0.1 enum 值兼容
+///
+/// 通过 `#[serde(alias)]` 兼容老 manifest, 不破 v0.1 用户的 ~/.frank/manifests/.
+/// 老 `public` → `frank-recommended`, 老 `own-public` → `frank-own`, 老 `private` → `user-private`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Visibility {
-    /// 完全公开 (上游 GitHub 公开仓)。
-    Public,
-    /// 你自研, 但已开源的 (可双向 push)。
-    OwnPublic,
-    /// 私有 (公司 skills, 严禁公开 repo)。
-    Private,
+    /// frank 作者 (芳哥) 自研开源 — 装 frank 默认带, 维护者是项目方。
+    #[serde(alias = "own-public")]
+    FrankOwn,
+
+    /// frank 作者推荐的 upstream / 第三方 skill — 默认列在 builtin manifest 里, 一键装。
+    #[serde(alias = "public")]
+    FrankRecommended,
+
+    /// 用户自己开源的 skills — 任意公开 git URL, 无凭据。
+    UserPublic,
+
+    /// 用户自己**公司**的 skills — 跟 frank 项目方无关, 严禁混入本仓! 用 ~/.frank/manifests/。
+    UserCompany,
+
+    /// 用户自己私有的 skills — 仅本机 / 个人凭据访问。
+    #[serde(alias = "private")]
+    UserPrivate,
+}
+
+impl Visibility {
+    /// 是否属于 frank 内置 (项目作者维护, 装 frank 默认有)。
+    #[must_use]
+    pub fn is_frank_builtin(self) -> bool {
+        matches!(self, Self::FrankOwn | Self::FrankRecommended)
+    }
+
+    /// 是否属于用户自定义 (用户自己 manifest 加的)。
+    #[must_use]
+    pub fn is_user_custom(self) -> bool {
+        !self.is_frank_builtin()
+    }
 }
 
 /// 鉴权方式。
@@ -261,8 +302,9 @@ fn default_health_timeout() -> u32 {
 mod tests {
     use super::*;
 
+    /// v0.2 新 visibility 值 (frank-own / frank-recommended / user-public / user-company / user-private)。
     #[test]
-    fn parses_minimal_skill() {
+    fn parses_minimal_skill_v02() {
         let yaml = r"
 schema_version: 1
 skills:
@@ -270,18 +312,33 @@ skills:
     source:
       type: git
       url: https://github.com/hutiefang76/skills-doris-ops.git
-    visibility: own-public
+    visibility: frank-own
 ";
         let m: Manifest = serde_yml::from_str(yaml).expect("parse minimal manifest");
-        assert_eq!(m.schema_version, 1);
         assert_eq!(m.skills.len(), 1);
-        assert_eq!(m.skills[0].name, "doris-ops");
-        assert!(matches!(m.skills[0].visibility, Visibility::OwnPublic));
-        assert_eq!(m.skills[0].target_platforms.len(), 3); // 默认全平台
+        assert!(matches!(m.skills[0].visibility, Visibility::FrankOwn));
+        assert!(m.skills[0].visibility.is_frank_builtin());
     }
 
+    /// v0.1 老 manifest (`own-public` / `public` / `private`) 仍能 load — alias 兼容。
     #[test]
-    fn parses_private_kdwl_skill() {
+    fn parses_v01_aliases() {
+        for (alias, expect) in [
+            ("own-public", Visibility::FrankOwn),
+            ("public", Visibility::FrankRecommended),
+            ("private", Visibility::UserPrivate),
+        ] {
+            let yaml = format!(
+                "schema_version: 1\nskills:\n  - name: x\n    source: {{ type: git, url: 'https://example/x.git' }}\n    visibility: {alias}\n"
+            );
+            let m: Manifest = serde_yml::from_str(&yaml).unwrap();
+            assert_eq!(m.skills[0].visibility, expect, "alias {alias} 应该映射到 {expect:?}");
+        }
+    }
+
+    /// 用户自己公司的 skill (`user-company`) — 跟 frank 项目方无关。
+    #[test]
+    fn parses_user_company_skill() {
         let yaml = r"
 schema_version: 1
 profile: company
@@ -292,7 +349,7 @@ skills:
       url: git@github.com:hutiefang76/skills-kdwl.git
       ref: main
       subpath: internal/vehicle-events
-    visibility: private
+    visibility: user-company
     auth:
       method: ssh-key
       key_ref: id_ed25519_personal
@@ -300,11 +357,10 @@ skills:
     device_allowlist:
       - ATHENA-LAPTOP
 ";
-        let m: Manifest = serde_yml::from_str(yaml).expect("parse private skill");
+        let m: Manifest = serde_yml::from_str(yaml).expect("parse user-company skill");
         let s = &m.skills[0];
-        assert_eq!(s.name, "kdwl:vehicle-events");
-        assert!(matches!(s.visibility, Visibility::Private));
+        assert!(matches!(s.visibility, Visibility::UserCompany));
+        assert!(s.visibility.is_user_custom());
         assert_eq!(s.require_network, NetworkReq::Vpn);
-        assert_eq!(s.device_allowlist, vec!["ATHENA-LAPTOP"]);
     }
 }

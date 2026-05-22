@@ -87,23 +87,27 @@ pub fn merge(manifests: Vec<Manifest>) -> Vec<Skill> {
     v
 }
 
-/// 内置 public manifest 路径。
+/// 内置 builtin manifest 路径 (v0.2: `builtin.yaml`, 兼容 v0.1 `public.yaml`)。
 ///
-/// 开发模式 (`cargo run`): `<repo>/manifest/public.yaml`
-/// 安装后: `<exe-dir>/../manifest/public.yaml`
+/// 开发模式 (`cargo run`): `<repo>/manifest/{builtin,public}.yaml`
+/// 安装后: `<exe-dir>/../manifest/{builtin,public}.yaml`
+///
+/// v0.2 重命名后, 新版优先用 `builtin.yaml`. 老 `public.yaml` 仍兼容 (用户老 fork 不破).
 fn built_in_public_path() -> Option<PathBuf> {
-    // 开发时 (cargo run 上下文)
-    let cargo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("manifest")
-        .join("public.yaml");
-    if cargo_path.exists() {
-        return Some(cargo_path);
+    let cargo_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest");
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("..").join("manifest")));
+
+    for base in [Some(cargo_dir), exe_dir].into_iter().flatten() {
+        for name in ["builtin.yaml", "public.yaml"] {
+            let p = base.join(name);
+            if p.exists() {
+                return Some(p);
+            }
+        }
     }
-    // 安装后
-    std::env::current_exe().ok().and_then(|p| {
-        p.parent()
-            .map(|d| d.join("..").join("manifest").join("public.yaml"))
-    })
+    None
 }
 
 /// 用户私有 manifest 目录: `~/.frank/manifests/`。
@@ -137,9 +141,10 @@ skills:
         let m2: Manifest = serde_yml::from_str(yaml2).unwrap();
         let merged = merge(vec![m1, m2]);
         assert_eq!(merged.len(), 1);
+        // 老 `private` 通过 serde alias 映射到 v0.2 `UserPrivate`
         assert!(matches!(
             merged[0].visibility,
-            crate::manifest::schema::Visibility::Private
+            crate::manifest::schema::Visibility::UserPrivate
         ));
     }
 

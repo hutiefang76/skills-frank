@@ -27,7 +27,7 @@ struct Row {
     /// skill 名称。
     name: String,
 
-    /// 可见性 (public / own-public / private)。
+    /// 可见性 (frank-own / frank-recommended / user-public / user-company / user-private)。
     visibility: String,
 
     /// 归属 profile。
@@ -44,13 +44,25 @@ impl Row {
     fn from_skill(s: &Skill, status: &str) -> Self {
         Self {
             name: s.name.clone(),
-            visibility: format!("{:?}", s.visibility)
-                .to_lowercase()
-                .replace("ownpublic", "own-public"),
+            // PascalCase → kebab-case 显示, 例: FrankOwn → frank-own
+            visibility: visibility_label(s.visibility),
             profile: s.profile.clone().unwrap_or_else(|| "personal".to_string()),
             status: status.to_string(),
             description: truncate(&s.description, 60),
         }
+    }
+}
+
+fn visibility_label(v: crate::manifest::schema::Visibility) -> String {
+    use crate::manifest::schema::Visibility::{
+        FrankOwn, FrankRecommended, UserCompany, UserPrivate, UserPublic,
+    };
+    match v {
+        FrankOwn => "frank-own".into(),
+        FrankRecommended => "frank-recommended".into(),
+        UserPublic => "user-public".into(),
+        UserCompany => "user-company".into(),
+        UserPrivate => "user-private".into(),
     }
 }
 

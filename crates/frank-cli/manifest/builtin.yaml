@@ -1,0 +1,82 @@
+# Frank 内置 skills 清单 — frank 项目作者 (芳哥 / hutiefang76) 维护
+#
+# 这个文件随 frank 二进制一起分发, 包含两类:
+#
+#   1. frank-own            — 芳哥自研开源 skills (装 frank 即拥有)
+#   2. frank-recommended    — 芳哥推荐的 upstream / 第三方 skills (一键装)
+#
+# 用户自己的 skills (无论公司 / 私有 / 开源) **不在此文件** — 放
+# ~/.frank/manifests/*.yaml. visibility 用 `user-*` 系列, 那是用户视角的分类
+# (跟 frank 项目作者无关). 详见 README "Skills 两层 5 档分类" 一节。
+#
+# schema 详见 docs/DESIGN.md §7.1
+
+schema_version: 1
+profile: personal
+
+skills:
+  # ═══════════════════════════════════════════════════════════════
+  # frank-recommended — 芳哥推荐 (upstream / 第三方, 装 frank 时一键)
+  # ═══════════════════════════════════════════════════════════════
+
+  - name: skill-creator
+    description: 创建/迭代新 skill 的元 skill (anthropics 官方)
+    source:
+      type: git
+      url: https://github.com/anthropics/skill-creator.git
+    visibility: frank-recommended
+    target_platforms: [claude, codex, opencode]
+
+  - name: superpowers
+    description: 通用编程超能力 (TDD/debug/brainstorming, anthropics 官方)
+    source:
+      type: git
+      url: https://github.com/anthropics/claude-superpowers.git
+    visibility: frank-recommended
+    target_platforms: [claude]
+
+  # ═══════════════════════════════════════════════════════════════
+  # frank-own — 芳哥 (hutiefang76) 自研开源 skills
+  # ═══════════════════════════════════════════════════════════════
+
+  - name: doris-ops
+    description: TCHouse-D (Doris) 运维 (查表/性能/扩容)
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-doris-ops.git
+    visibility: frank-own
+    dependencies:
+      python: ["mysql-connector-python>=8.0"]
+    health_check:
+      cmd: "python -c 'import mysql.connector'"
+      timeout_seconds: 5
+
+  - name: feishu-read
+    description: 飞书文档/表格/Excel/PDF 提取
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-feishu-read.git
+    visibility: frank-own
+    dependencies:
+      python: ["pdfplumber", "openpyxl"]
+
+  - name: nacos-config
+    description: Nacos 配置中心查询/修改
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-nacos-config.git
+    visibility: frank-own
+
+  - name: dolphinscheduler-ops
+    description: DolphinScheduler 任务运维 (查询/重跑/暂停)
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-dolphinscheduler-ops.git
+    visibility: frank-own
+
+  - name: streampark-ops
+    description: StreamPark Flink 作业管理 (提交/启停/查日志)
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-streampark-ops.git
+    visibility: frank-own
