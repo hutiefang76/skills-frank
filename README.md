@@ -115,6 +115,32 @@ frank install doris-ops               # 公开 skill (manifest/public.yaml)
 frank install kdwl:vehicle-events     # 公司 skill (~/.frank/manifests/, SSH + VPN)
 ```
 
+### orchestrator 子命令 (P6 M1 真接本机 CLI subprocess)
+
+`frank orchestrator` 真起本机 `claude` / `codex` / `opencode` / `gemini` 子进程,
+**走你已付费的订阅(Pro/Plus/Go)**,不重复花 API key 的钱。多 Job 各自 subprocess,
+**OS pid 级隔离, 多任务天然不串**。
+
+```bash
+# 看本机装了哪些 CLI
+frank orchestrator providers
+
+# 真跑一次 codex (gpt-5.5 Plus 订阅)
+frank orchestrator demo --provider codex --prompt "Say hi" --timeout 300
+
+# 真跑一次 claude (需要先 claude setup-token 登录 CLI, 见故障排查)
+frank orchestrator demo --provider claude --prompt "Say hi"
+```
+
+#### 故障排查
+
+| 现象 | 原因 | 修复 |
+|---|---|---|
+| `claude` exit 1 / 401 auth error | 你机器只登录了 Claude Desktop App,**`claude` CLI 自己没登录** (`~/.claude/.credentials*` 不存在) | `claude setup-token` 一次性登录 CLI(订阅自动识别) |
+| `claude` 走 API key 而不是 OAuth | env 里有 `ANTHROPIC_API_KEY` 但是空值 (会覆盖 OAuth) | `unset ANTHROPIC_API_KEY` 然后再跑 |
+| `codex` timeout | high-reasoning 慢,默认 120s 不够 | `--timeout 300` 或更高 |
+| `frank orchestrator providers` 显示 ✗ | CLI 没装在 PATH 里 | `brew install` / `npm i -g` 对应 CLI |
+
 ### memory 子命令（P5 进行中,需 sync-agent 在线）
 
 ```bash
