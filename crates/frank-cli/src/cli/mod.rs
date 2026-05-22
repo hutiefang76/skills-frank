@@ -27,6 +27,7 @@ pub mod memory;
 pub mod orchestrator;
 pub mod orchestrator_server;
 pub mod scan;
+pub mod sync;
 pub mod uninstall;
 
 /// frank — AI 工具链治理平台 CLI。
@@ -93,6 +94,9 @@ enum Commands {
     /// AI 一问一答桥 — `frank ai ask --to <provider> <prompt>`,转发给目标 CLI 拿回答。
     Ai(ai::Args),
 
+    /// 跨设备 skills 同步 — `frank sync push/pull/devices` (用户需求 2.3)。
+    Sync(sync::Args),
+
     // ----- 以下为占位, P1 实现 -----
     /// 升级到最新版本 (P1 待实现)。
     Update,
@@ -121,6 +125,7 @@ pub fn run() -> Result<()> {
         Commands::Doctor(args) => doctor::run(args),
         Commands::Orchestrator(args) => orchestrator::run(args),
         Commands::Ai(args) => ai::run(args),
+        Commands::Sync(args) => sync::run(args),
         Commands::Update => stub("update"),
         Commands::Rollback => stub("rollback"),
     }

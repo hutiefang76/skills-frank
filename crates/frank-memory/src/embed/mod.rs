@@ -8,8 +8,10 @@
 
 use async_trait::async_trait;
 
-pub mod local;
 pub mod openai;
+// 本地 ONNX embedder (fastembed) 移到 frank-sync-agent crate 里实现,
+// 因 fastembed 拉 onnxruntime 系统依赖会破坏 frank-cli 跨平台 release build.
+// frank-cli (走订阅 0 token 的路径) 不需要本地 embedder.
 
 /// 一次 embedding 输出: dense float vector + 模型/维度元数据。
 #[derive(Debug, Clone)]

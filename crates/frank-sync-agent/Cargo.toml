@@ -36,5 +36,15 @@ uuid = { version = "1.23", features = ["v4", "serde"] }
 # async-trait 用于 mock embedder/extractor 实现 frank-memory 的 trait (#[async_trait])
 async-trait = "0.1"
 
+# 本地 ONNX embedding (零 token). 仅在服务端用 — frank-cli release binary 不引,
+# 因 fastembed 拉 onnxruntime 在某些 target (macOS x86_64, aarch64-linux) build 麻烦.
+fastembed = { version = "5.13", default-features = false, features = [
+    "ort-download-binaries",
+    "hf-hub-rustls-tls",
+] }
+
+# block_on 给 fastembed sync API 用 (单实例 async embed 不能跨 spawn_blocking)
+futures = "0.3"
+
 [lints]
 workspace = true

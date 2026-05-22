@@ -41,6 +41,10 @@ pub fn router(state: AppState) -> Router {
         .route("/memory/list", post(memory_list))
         .route("/memory/:id", get(memory_get).delete(memory_delete))
         .route("/memory/delete/:id", delete(memory_delete)) // 同上, 给老 client 兜底
+        // ─── 跨设备 skills 同步 (v0.4 — 用户需求 2.3) ───
+        .route("/sync/skills/push", post(sync_push))
+        .route("/sync/skills/pull", get(sync_pull))
+        .route("/sync/skills/devices", get(sync_devices))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
 }
@@ -214,4 +218,89 @@ impl axum::response::IntoResponse for ApiError {
         tracing::warn!(error = %self.0, "API error");
         (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
     }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 跨设备 skills 同步 (v0.4 — 用户需求 2.3)
+//
+// 每台设备唯一 device_id (默认 hostname), push 把本机 state.json 透传给服务端,
+// pull 按 device_id 拿别人的列表. 服务端 KV store (HashMap<id, JSON>), 不解 schema.
+// v0.5 改 SQLite 持久化.
+// ════════════════════════════════════════════════════════════════
+
+#[derive(Deserialize)]
+struct SyncPushRequest {
+    device_id: String,
+    state: serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct SyncPushResponse {
+    device_id: String,
+    skills_count: usize,
+}
+
+async fn sync_push(
+    State(state): State<AppState>,
+    Json(req): Json<SyncPushRequest>,
+) -> ApiResult<Json<SyncPushResponse>> {
+    let count = req
+        .state
+        .get("skills")
+        .and_then(|v| v.as_object())
+        .map_or(0, serde_json::Map::len);
+    state
+        .skills_sync
+        .write()
+        .await
+        .insert(req.device_id.clone(), req.state);
+    tracing::info!(device = %req.device_id, skills = count, "sync push received");
+    Ok(Json(SyncPushResponse {
+        device_id: req.device_id,
+        skills_count: count,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SyncPullQuery {
+    device_id: String,
+}
+
+async fn sync_pull(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<SyncPullQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let store = state.skills_sync.read().await;
+    let payload = store.get(&q.device_id).cloned().unwrap_or(serde_json::json!({
+        "schema_version": 1,
+        "profile": "personal",
+        "skills": {}
+    }));
+    Ok(Json(payload))
+}
+
+#[derive(Serialize)]
+struct SyncDevicesResponse {
+    devices: Vec<DeviceInfo>,
+}
+
+#[derive(Serialize)]
+struct DeviceInfo {
+    device_id: String,
+    skills_count: usize,
+}
+
+async fn sync_devices(State(state): State<AppState>) -> Json<SyncDevicesResponse> {
+    let store = state.skills_sync.read().await;
+    let devices: Vec<DeviceInfo> = store
+        .iter()
+        .map(|(id, v)| DeviceInfo {
+            device_id: id.clone(),
+            skills_count: v
+                .get("skills")
+                .and_then(|s| s.as_object())
+                .map_or(0, serde_json::Map::len),
+        })
+        .collect();
+    Json(SyncDevicesResponse { devices })
 }

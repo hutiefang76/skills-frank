@@ -7,8 +7,10 @@ use std::env;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use frank_memory::embed::local::LocalEmbedder;
+use crate::local_embedder::LocalEmbedder;
 use frank_memory::embed::openai::OpenAIEmbedder;
+use std::collections::HashMap;
+use tokio::sync::RwLock;
 use frank_memory::extract::claude::ClaudeExtractor;
 use frank_memory::store::qdrant::QdrantStore;
 use frank_memory::{Embedder, FactExtractor, Memory, MemoryConfig, MemoryStore};
@@ -16,8 +18,11 @@ use frank_memory::{Embedder, FactExtractor, Memory, MemoryConfig, MemoryStore};
 /// 服务级共享状态。
 #[derive(Clone)]
 pub struct AppState {
-    /// 高层记忆门面。
+    /// 高层记忆门面 (frank-memory)。
     pub memory: Arc<Memory>,
+    /// 跨设备 skills state 同步: 每个 device_id 一份 state.json 透传 JSON。
+    /// v0.4 内存版重启丢; v0.5 SQLite 持久化.
+    pub skills_sync: Arc<RwLock<HashMap<String, serde_json::Value>>>,
 }
 
 impl AppState {
@@ -92,6 +97,7 @@ impl AppState {
 
         Ok(Self {
             memory: Arc::new(memory),
+            skills_sync: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 }

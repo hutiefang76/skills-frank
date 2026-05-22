@@ -25,7 +25,7 @@ use async_trait::async_trait;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use tokio::sync::Mutex;
 
-use crate::embed::{Embedder, Embedding};
+use frank_memory::embed::{Embedder, Embedding};
 
 /// 本地 ONNX embedding (fastembed-rs)。
 ///
@@ -45,6 +45,7 @@ impl LocalEmbedder {
     }
 
     /// 多语种模型 (50 语种, 384 维, 中文友好)。
+    #[allow(dead_code)]
     pub fn multilingual() -> Result<Self> {
         Self::with_model(EmbeddingModel::ParaphraseMLMiniLML12V2)
     }
