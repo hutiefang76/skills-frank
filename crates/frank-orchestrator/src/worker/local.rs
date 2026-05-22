@@ -142,6 +142,23 @@ impl Worker for LocalCliWorker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+
+        // 清理"空字符串 API key"陷阱: Claude Code 桌面 app / 某些 IDE 会把空的
+        // ANTHROPIC_API_KEY="" 注入 shell env, claude CLI 检测到 env 存在就走 API key
+        // 认证 (用空 key 调 API → 401), 不再回退 OAuth. 子进程级 env_remove 让 CLI 重新
+        // 看不到这个变量, 走 OAuth/keychain (用户 Pro/Plus 订阅真路径).
+        // codex / opencode / gemini 同款保险 (它们 env var 名虽不同, 但行为模式一样).
+        for key in [
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+        ] {
+            if std::env::var(key).is_ok_and(|v| v.trim().is_empty()) {
+                cmd.env_remove(key);
+                tracing::debug!("unset empty {key} from subprocess env (avoid 401 trap)");
+            }
+        }
         if let Some(ws) = &self.workspace {
             cmd.current_dir(ws);
         }
@@ -213,9 +230,20 @@ impl Worker for LocalCliWorker {
             .await;
 
         if !status.success() {
+            // 非 0 退出: 把 stdout 摘要也带上, 用户能立刻看到 CLI 的真错误信息
+            // (例: claude 401 / codex network error 等都打 stdout, 不带就只看到 exit code 没法诊断)
+            let preview: String = stdout_str.chars().take(400).collect();
+            let hint = if bin == "claude" && preview.contains("authentication") {
+                "\n💡 修复: 跑 `claude setup-token` 一次登录 CLI (Pro 订阅 OAuth)"
+            } else if preview.contains("401") || preview.contains("Unauthorized") {
+                "\n💡 修复: 检查该 CLI 的 auth 配置, 跑 `<bin> auth login` 或 setup-token"
+            } else {
+                ""
+            };
             return Err(anyhow!(
-                "local CLI `{bin}` exit {}",
-                status.code().unwrap_or(-1)
+                "local CLI `{bin}` exit {} — output:\n{}{hint}",
+                status.code().unwrap_or(-1),
+                preview
             ));
         }
 
