@@ -44,6 +44,16 @@ reqwest = { version = "0.13", default-features = false, features = [
 # Random for backoff jitter (后续 retry 用)
 # rand = "0.9"  # 暂不加, retry 由 reqwest-retry 接管或简单实现
 
+# 本地 ONNX embedding (零 token, 跨平台). 用 rustls + cudnn 关掉 native-tls/cuda
+# 减体积. 默认下载 BAAI/bge-* 系列 ONNX 到 ~/.cache (首次启动)
+fastembed = { version = "5.13", default-features = false, features = [
+    "ort-download-binaries",
+    "hf-hub-rustls-tls",
+] }
+
+# block_on 给 fastembed sync API 用 (单实例 async embed 不能跨 spawn_blocking)
+futures = "0.3"
+
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }

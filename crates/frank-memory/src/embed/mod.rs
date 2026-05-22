@@ -8,6 +8,7 @@
 
 use async_trait::async_trait;
 
+pub mod local;
 pub mod openai;
 
 /// 一次 embedding 输出: dense float vector + 模型/维度元数据。

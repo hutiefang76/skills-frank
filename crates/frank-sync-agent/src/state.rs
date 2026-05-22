@@ -7,6 +7,7 @@ use std::env;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use frank_memory::embed::local::LocalEmbedder;
 use frank_memory::embed::openai::OpenAIEmbedder;
 use frank_memory::extract::claude::ClaudeExtractor;
 use frank_memory::store::qdrant::QdrantStore;
@@ -25,39 +26,65 @@ impl AppState {
     /// # 环境变量
     /// - `FRANK_QDRANT_URL` (默认 `http://qdrant:6334`)
     /// - `FRANK_COLLECTION` (默认 `frank_memories_v1`)
-    /// - `FRANK_MEMORY_MOCK` (= `"1"` 时启用 mock embedder/extractor, 不需要外部 API key)
-    /// - `OPENAI_API_KEY` (mock 关闭时必填) — `OpenAIEmbedder`
-    /// - `ANTHROPIC_API_KEY` (mock 关闭时必填) — `ClaudeExtractor`
+    /// - `FRANK_MEMORY_MOCK` (= `"1"` 强制 zero-vector mock, 仅用于无网络冒烟)
+    /// - `OPENAI_API_KEY` (可选) — `OpenAIEmbedder` (1536 维, 质量比 fastembed 好但要 token)
+    /// - `ANTHROPIC_API_KEY` (可选) — `ClaudeExtractor` 服务端抽 fact
+    ///
+    /// # 默认: 零 token (LocalEmbedder + mock 行拆)
+    ///
+    /// 没 `OPENAI_API_KEY` 时**默认走 LocalEmbedder** (fastembed BAAI/bge-small, 384 维,
+    /// 本地 ONNX, 0 token). 用户原问"分布式记忆需要 token 么"的答案: **不需要,默认就 0**.
+    /// 服务端只 embed, 抽 fact 走客户端 (frank-cli 用 frank-bridge 调用户订阅) — M3 todo.
     pub async fn from_env() -> Result<Self> {
         let qdrant_url =
             env::var("FRANK_QDRANT_URL").unwrap_or_else(|_| "http://qdrant:6334".to_string());
         let collection =
             env::var("FRANK_COLLECTION").unwrap_or_else(|_| "frank_memories_v1".to_string());
 
-        let use_mock = matches!(env::var("FRANK_MEMORY_MOCK").as_deref(), Ok("1"));
+        let force_mock = matches!(env::var("FRANK_MEMORY_MOCK").as_deref(), Ok("1"));
 
         let store: Box<dyn MemoryStore> = Box::new(
             QdrantStore::from_url(&qdrant_url, collection)
                 .with_context(|| format!("connect Qdrant at {qdrant_url}"))?,
         );
 
-        let (embedder, extractor): (Box<dyn Embedder>, Box<dyn FactExtractor>) = if use_mock {
+        let (embedder, extractor): (Box<dyn Embedder>, Box<dyn FactExtractor>) = if force_mock {
             tracing::warn!(
-                "FRANK_MEMORY_MOCK=1: using zero-vector embedder + line-split extractor; \
-                 NOT for production"
+                "FRANK_MEMORY_MOCK=1: zero-vector embedder + line-split extractor; \
+                 ONLY for offline smoke"
             );
             (
                 Box::new(crate::mock::MockEmbedder),
                 Box::new(crate::mock::MockExtractor),
             )
         } else {
-            let openai_key = env::var("OPENAI_API_KEY").context("env OPENAI_API_KEY required")?;
-            let anthropic_key =
-                env::var("ANTHROPIC_API_KEY").context("env ANTHROPIC_API_KEY required")?;
-            (
-                Box::new(OpenAIEmbedder::small(openai_key)),
-                Box::new(ClaudeExtractor::haiku(anthropic_key)),
-            )
+            // 默认零 token 路径: LocalEmbedder (fastembed 384 维) + mock 行拆 extractor
+            let embedder: Box<dyn Embedder> = match env::var("OPENAI_API_KEY") {
+                Ok(key) if !key.trim().is_empty() => {
+                    tracing::info!("OPENAI_API_KEY set: using OpenAIEmbedder (1536d)");
+                    Box::new(OpenAIEmbedder::small(key))
+                }
+                _ => {
+                    tracing::info!(
+                        "no OPENAI_API_KEY: using LocalEmbedder (fastembed BAAI/bge-small 384d, 0 token)"
+                    );
+                    Box::new(LocalEmbedder::small().context("init LocalEmbedder")?)
+                }
+            };
+            let extractor: Box<dyn FactExtractor> = match env::var("ANTHROPIC_API_KEY") {
+                Ok(key) if !key.trim().is_empty() => {
+                    tracing::info!("ANTHROPIC_API_KEY set: using ClaudeExtractor (Haiku)");
+                    Box::new(ClaudeExtractor::haiku(key))
+                }
+                _ => {
+                    tracing::info!(
+                        "no ANTHROPIC_API_KEY: using mock extractor (split by \\n); \
+                         M3 todo: frank-cli 客户端 frank-bridge 抽 fact"
+                    );
+                    Box::new(crate::mock::MockExtractor)
+                }
+            };
+            (embedder, extractor)
         };
 
         let cfg = MemoryConfig::new(store, embedder, extractor);
