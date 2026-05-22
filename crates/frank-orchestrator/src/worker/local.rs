@@ -142,23 +142,7 @@ impl Worker for LocalCliWorker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-
-        // 清理"空字符串 API key"陷阱: Claude Code 桌面 app / 某些 IDE 会把空的
-        // ANTHROPIC_API_KEY="" 注入 shell env, claude CLI 检测到 env 存在就走 API key
-        // 认证 (用空 key 调 API → 401), 不再回退 OAuth. 子进程级 env_remove 让 CLI 重新
-        // 看不到这个变量, 走 OAuth/keychain (用户 Pro/Plus 订阅真路径).
-        // codex / opencode / gemini 同款保险 (它们 env var 名虽不同, 但行为模式一样).
-        for key in [
-            "ANTHROPIC_API_KEY",
-            "OPENAI_API_KEY",
-            "GEMINI_API_KEY",
-            "GOOGLE_API_KEY",
-        ] {
-            if std::env::var(key).is_ok_and(|v| v.trim().is_empty()) {
-                cmd.env_remove(key);
-                tracing::debug!("unset empty {key} from subprocess env (avoid 401 trap)");
-            }
-        }
+        strip_empty_api_keys(&mut cmd);
         if let Some(ws) = &self.workspace {
             cmd.current_dir(ws);
         }
@@ -254,6 +238,27 @@ impl Worker for LocalCliWorker {
                 "exit_code": status.code(),
             }),
         })
+    }
+}
+
+/// 清理"空字符串 API key"陷阱.
+///
+/// Claude Code 桌面 app / 某些 IDE 启动时把空 `ANTHROPIC_API_KEY=""` 注入 shell env;
+/// claude / codex / gemini CLI 检测到 env 存在 (即便空) 就走 "API key 认证" 路径,
+/// 用空字符串调 API → 401. 子进程级 env_remove 让 CLI 看不到这些变量, 自动回退
+/// OAuth/keychain (Pro/Plus/Go 订阅真路径).
+fn strip_empty_api_keys(cmd: &mut Command) {
+    const SUSPECT: &[&str] = &[
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+    ];
+    for key in SUSPECT {
+        if std::env::var(key).is_ok_and(|v| v.trim().is_empty()) {
+            cmd.env_remove(key);
+            tracing::debug!("unset empty {key} from subprocess env (avoid 401 trap)");
+        }
     }
 }
 
