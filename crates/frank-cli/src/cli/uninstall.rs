@@ -26,7 +26,7 @@ pub fn run(args: Args) -> Result<()> {
         .ok_or_else(|| anyhow!("`{}` is not installed (no record in state.json)", args.name))?
         .clone();
 
-    installer::uninstall_skill(&entry.name, &entry.platforms)?;
+    installer::uninstall_skill_mcp_aware(&entry.name, &entry.source_ref, &entry.platforms)?;
     state.remove(&args.name);
     state.save()?;
 

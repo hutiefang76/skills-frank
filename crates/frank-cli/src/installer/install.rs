@@ -37,6 +37,11 @@ pub struct InstallOutcome {
 pub fn install_skill(skill: &Skill) -> Result<InstallOutcome> {
     check_device_allowlist(skill)?;
 
+    // Source::Mcp 走完全不同的路径: 不 git fetch, 不 symlink, 写 MCP 配置文件
+    if let Source::Mcp { command, args, env } = &skill.source {
+        return install_mcp(skill, command, args, env);
+    }
+
     let (commit_sha, source_root) = fetch_source(skill)?;
     let source_path = apply_subpath(&source_root, &skill.source);
 
@@ -53,6 +58,53 @@ pub fn install_skill(skill: &Skill) -> Result<InstallOutcome> {
         commit_sha,
         source_path,
         platforms: installed,
+    })
+}
+
+/// MCP server 安装分支: 把 command/args/env 写入各平台 MCP 配置文件。
+///
+/// v0.4 仅支持 Claude Code (`~/.claude.json` `mcpServers`); codex (`config.toml`)
+/// 与 opencode 留 v0.5+.
+fn install_mcp(
+    skill: &Skill,
+    command: &str,
+    args: &[String],
+    env: &std::collections::HashMap<String, String>,
+) -> Result<InstallOutcome> {
+    let entry = crate::installer::mcp::McpEntry {
+        name: skill.name.clone(),
+        command: command.to_string(),
+        args: args.to_vec(),
+        env: env.clone(),
+    };
+
+    let mut installed_platforms: Vec<Platform> = Vec::new();
+    let want_claude = skill.target_platforms.contains(&Platform::Claude);
+    if want_claude {
+        crate::installer::mcp::install_claude(&entry)
+            .with_context(|| format!("write Claude MCP entry for `{}`", skill.name))?;
+        installed_platforms.push(Platform::Claude);
+    }
+
+    // codex / opencode MCP install: TODO v0.5
+    let unsupported: Vec<_> = skill
+        .target_platforms
+        .iter()
+        .filter(|p| !matches!(p, Platform::Claude))
+        .copied()
+        .collect();
+    if !unsupported.is_empty() {
+        tracing::warn!(
+            skill = %skill.name,
+            platforms = ?unsupported,
+            "MCP install on these platforms not yet implemented (v0.5 todo); skipped"
+        );
+    }
+
+    Ok(InstallOutcome {
+        commit_sha: "mcp".to_string(),
+        source_path: PathBuf::from("(MCP config injection, no source path)"),
+        platforms: installed_platforms,
     })
 }
 
@@ -87,6 +139,10 @@ fn fetch_source(skill: &Skill) -> Result<(String, PathBuf)> {
         }
         Source::Upstream { parent } => {
             bail!("upstream source not yet implemented (parent={parent})");
+        }
+        Source::Mcp { .. } => {
+            // Mcp 在 install_skill 顶层就分叉了, 不会走到这里; safety bail
+            bail!("internal: MCP source should be handled at install_skill top level");
         }
     }
 }
@@ -135,7 +191,23 @@ fn rollback(name: &str, installed: &[Platform]) {
 
 /// 卸载一个 skill (从全部 `platforms` 上移除链接)。
 ///
-/// 单个 adapter 失败不中断后续 — 尽力卸完, 把所有错误聚合后再 bail。
+/// MCP skill (source_ref == "mcp") 走 [`crate::installer::mcp::uninstall_claude`];
+/// 普通 git/local skill 走 adapter symlink remove. 单个 adapter 失败不中断后续 —
+/// 尽力卸完, 把所有错误聚合后再 bail。
+pub fn uninstall_skill_mcp_aware(
+    name: &str,
+    source_ref: &str,
+    platforms: &[Platform],
+) -> Result<()> {
+    if source_ref == "mcp" {
+        // MCP 卸载: 从 ~/.claude.json 移除 mcpServers.<name> (v0.4 仅 Claude)
+        return crate::installer::mcp::uninstall_claude(name)
+            .with_context(|| format!("uninstall MCP entry `{name}` from Claude config"));
+    }
+    uninstall_skill(name, platforms)
+}
+
+/// 卸载一个 skill (link 风格, git/local source)。保留向后兼容入口。
 pub fn uninstall_skill(name: &str, platforms: &[Platform]) -> Result<()> {
     let mut errors: Vec<String> = Vec::new();
     for &p in platforms {

@@ -14,3 +14,4 @@
 pub mod git;
 pub mod install;
 pub mod link;
+pub mod mcp;

@@ -106,6 +106,24 @@ pub enum Source {
         /// 上游 skill 的 name。
         parent: String,
     },
+    /// MCP server (v0.4 新增) — 不走 git/symlink, 走平台 MCP 配置注入。
+    ///
+    /// install 时:
+    /// - claude: 改 `~/.claude.json` `mcpServers.<name> = { command, args }`
+    /// - codex: 追加 `~/.codex/config.toml` `[mcp_servers.<name>]` (v0.5+)
+    /// - opencode: 暂不支持 MCP
+    ///
+    /// uninstall 反向删那一项. 不动其他 mcpServers 条目, 不动 manifest 外字段.
+    Mcp {
+        /// 启动命令 (例 `npx` / `uvx` / 二进制路径)。
+        command: String,
+        /// 命令参数 (例 `["-y", "@modelcontextprotocol/server-time"]`)。
+        #[serde(default)]
+        args: Vec<String>,
+        /// 环境变量 (可选, 例 API key, 通常引 keychain)。
+        #[serde(default)]
+        env: std::collections::HashMap<String, String>,
+    },
 }
 
 /// skill 可见性 / 权限分档 (v0.2 双层模型)。

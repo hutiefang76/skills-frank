@@ -35,6 +35,44 @@ skills:
     visibility: frank-recommended
     target_platforms: [claude]
 
+  # ===== frank-recommended MCP (v0.4 新增, 巧妙集成: source.type=mcp 自动写 ~/.claude.json) =====
+
+  - name: mcp-time
+    description: 时间/时区 MCP server (anthropics 官方, 跨时区代码 + 日历 必备)
+    source:
+      type: mcp
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-time"]
+    visibility: frank-recommended
+    target_platforms: [claude]   # codex/opencode MCP install 留 v0.5
+
+  - name: mcp-sequential-thinking
+    description: 序列化思考 MCP (anthropics 官方, 让 AI 分步推理大问题)
+    source:
+      type: mcp
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    visibility: frank-recommended
+    target_platforms: [claude]
+
+  - name: mcp-fetch
+    description: HTTP fetch MCP (uvx mcp-server-fetch, AI 真能上网拉文档)
+    source:
+      type: mcp
+      command: uvx
+      args: ["mcp-server-fetch"]
+    visibility: frank-recommended
+    target_platforms: [claude]
+
+  - name: mcp-context7
+    description: 第三方库文档 MCP (upstash/context7, 实时拉最新 SDK 文档)
+    source:
+      type: mcp
+      command: npx
+      args: ["-y", "@upstash/context7-mcp"]
+    visibility: frank-recommended
+    target_platforms: [claude]
+
   # ═══════════════════════════════════════════════════════════════
   # frank-own — 芳哥 (hutiefang76) 自研开源 skills
   # ═══════════════════════════════════════════════════════════════
