@@ -44,7 +44,7 @@ skills:
       command: npx
       args: ["-y", "@modelcontextprotocol/server-time"]
     visibility: frank-recommended
-    target_platforms: [claude]   # codex/opencode MCP install 留 v0.5
+    target_platforms: [claude, codex]
 
   - name: mcp-sequential-thinking
     description: 序列化思考 MCP (anthropics 官方, 让 AI 分步推理大问题)
@@ -53,7 +53,7 @@ skills:
       command: npx
       args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
     visibility: frank-recommended
-    target_platforms: [claude]
+    target_platforms: [claude, codex]
 
   - name: mcp-fetch
     description: HTTP fetch MCP (uvx mcp-server-fetch, AI 真能上网拉文档)
@@ -62,7 +62,7 @@ skills:
       command: uvx
       args: ["mcp-server-fetch"]
     visibility: frank-recommended
-    target_platforms: [claude]
+    target_platforms: [claude, codex]
 
   - name: mcp-context7
     description: 第三方库文档 MCP (upstash/context7, 实时拉最新 SDK 文档)
@@ -71,7 +71,7 @@ skills:
       command: npx
       args: ["-y", "@upstash/context7-mcp"]
     visibility: frank-recommended
-    target_platforms: [claude]
+    target_platforms: [claude, codex]
 
   # ═══════════════════════════════════════════════════════════════
   # frank-own — 芳哥 (hutiefang76) 自研开源 skills

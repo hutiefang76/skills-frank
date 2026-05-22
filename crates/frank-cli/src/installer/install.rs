@@ -79,25 +79,22 @@ fn install_mcp(
     };
 
     let mut installed_platforms: Vec<Platform> = Vec::new();
-    let want_claude = skill.target_platforms.contains(&Platform::Claude);
-    if want_claude {
+    if skill.target_platforms.contains(&Platform::Claude) {
         crate::installer::mcp::install_claude(&entry)
             .with_context(|| format!("write Claude MCP entry for `{}`", skill.name))?;
         installed_platforms.push(Platform::Claude);
     }
+    if skill.target_platforms.contains(&Platform::Codex) {
+        crate::installer::mcp::install_codex(&entry)
+            .with_context(|| format!("write codex MCP entry for `{}`", skill.name))?;
+        installed_platforms.push(Platform::Codex);
+    }
 
-    // codex / opencode MCP install: TODO v0.5
-    let unsupported: Vec<_> = skill
-        .target_platforms
-        .iter()
-        .filter(|p| !matches!(p, Platform::Claude))
-        .copied()
-        .collect();
-    if !unsupported.is_empty() {
+    // opencode MCP install: opencode 本身暂不支持 MCP, skip
+    if skill.target_platforms.contains(&Platform::Opencode) {
         tracing::warn!(
             skill = %skill.name,
-            platforms = ?unsupported,
-            "MCP install on these platforms not yet implemented (v0.5 todo); skipped"
+            "opencode 暂不支持 MCP, 跳过 (v0.x+)"
         );
     }
 
@@ -200,9 +197,22 @@ pub fn uninstall_skill_mcp_aware(
     platforms: &[Platform],
 ) -> Result<()> {
     if source_ref == "mcp" {
-        // MCP 卸载: 从 ~/.claude.json 移除 mcpServers.<name> (v0.4 仅 Claude)
-        return crate::installer::mcp::uninstall_claude(name)
-            .with_context(|| format!("uninstall MCP entry `{name}` from Claude config"));
+        // MCP 卸载: 从对应平台的 MCP 配置文件移除 <name> (Claude JSON + codex TOML)
+        let mut errors: Vec<String> = Vec::new();
+        if platforms.contains(&Platform::Claude) {
+            if let Err(e) = crate::installer::mcp::uninstall_claude(name) {
+                errors.push(format!("claude: {e:#}"));
+            }
+        }
+        if platforms.contains(&Platform::Codex) {
+            if let Err(e) = crate::installer::mcp::uninstall_codex(name) {
+                errors.push(format!("codex: {e:#}"));
+            }
+        }
+        if errors.is_empty() {
+            return Ok(());
+        }
+        bail!("MCP uninstall errors:\n  - {}", errors.join("\n  - "));
     }
     uninstall_skill(name, platforms)
 }

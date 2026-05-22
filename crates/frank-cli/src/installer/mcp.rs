@@ -99,6 +99,114 @@ pub fn claude_installed(name: &str) -> bool {
         .is_some_and(|m| m.contains_key(name))
 }
 
+// ─── codex (`~/.codex/config.toml` `[mcp_servers.<name>]`) ────────────────
+
+/// 把 MCP 注入 codex 的 `~/.codex/config.toml` `[mcp_servers.<name>]`。
+///
+/// codex 的 MCP 配置是 TOML, 字段:
+/// ```toml
+/// [mcp_servers.<name>]
+/// type = "stdio"
+/// command = "..."
+/// args = [...]
+/// env = { KEY = "..." }
+/// ```
+pub fn install_codex(entry: &McpEntry) -> Result<()> {
+    let path = codex_config_path()?;
+    let mut root = read_toml_or_empty(&path)?;
+
+    // 确保 mcp_servers 是 table
+    if !root.get("mcp_servers").is_some_and(toml::Value::is_table) {
+        if let toml::Value::Table(ref mut map) = root {
+            map.insert(
+                "mcp_servers".to_string(),
+                toml::Value::Table(toml::map::Map::new()),
+            );
+        }
+    }
+
+    let mut server = toml::map::Map::new();
+    server.insert("type".to_string(), toml::Value::String("stdio".to_string()));
+    server.insert(
+        "command".to_string(),
+        toml::Value::String(entry.command.clone()),
+    );
+    server.insert(
+        "args".to_string(),
+        toml::Value::Array(
+            entry
+                .args
+                .iter()
+                .map(|s| toml::Value::String(s.clone()))
+                .collect(),
+        ),
+    );
+    if !entry.env.is_empty() {
+        let mut env_table = toml::map::Map::new();
+        for (k, v) in &entry.env {
+            env_table.insert(k.clone(), toml::Value::String(v.clone()));
+        }
+        server.insert("env".to_string(), toml::Value::Table(env_table));
+    }
+
+    if let Some(toml::Value::Table(servers)) = root
+        .as_table_mut()
+        .and_then(|m| m.get_mut("mcp_servers"))
+    {
+        servers.insert(entry.name.clone(), toml::Value::Table(server));
+    }
+
+    atomic_write_toml(&path, &root)
+}
+
+/// 从 codex config.toml 反向删 `[mcp_servers.<name>]`。幂等。
+pub fn uninstall_codex(name: &str) -> Result<()> {
+    let path = codex_config_path()?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut root = read_toml_or_empty(&path)?;
+    if let Some(toml::Value::Table(servers)) = root
+        .as_table_mut()
+        .and_then(|m| m.get_mut("mcp_servers"))
+    {
+        servers.remove(name);
+    }
+    atomic_write_toml(&path, &root)
+}
+
+fn codex_config_path() -> Result<PathBuf> {
+    Ok(dirs::home_dir()
+        .context("locate home dir")?
+        .join(".codex")
+        .join("config.toml"))
+}
+
+fn read_toml_or_empty(path: &std::path::Path) -> Result<toml::Value> {
+    if !path.exists() {
+        return Ok(toml::Value::Table(toml::map::Map::new()));
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read {}", path.display()))?;
+    if content.trim().is_empty() {
+        return Ok(toml::Value::Table(toml::map::Map::new()));
+    }
+    toml::from_str(&content).with_context(|| format!("parse {} as TOML", path.display()))
+}
+
+fn atomic_write_toml(path: &std::path::Path, value: &toml::Value) -> Result<()> {
+    let text = toml::to_string_pretty(value).context("serialize TOML")?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("mkdir {}", parent.display()))?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    fs::write(&tmp, text).with_context(|| format!("write tmp {}", tmp.display()))?;
+    fs::rename(&tmp, path)
+        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
 fn claude_config_path() -> Result<PathBuf> {
     Ok(dirs::home_dir()
         .context("locate home dir")?
