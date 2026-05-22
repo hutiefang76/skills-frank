@@ -29,6 +29,16 @@ pub enum OrchestratorCommand {
     Demo(DemoArgs),
     /// 健康检查: 看本机装了哪些 CLI provider。
     Providers,
+    /// (P6 M2) 启动本机 daemon + Web UI: 浏览器多 Job 看板 + WebSocket 实时 log。
+    Serve(ServeArgs),
+}
+
+/// `frank orchestrator serve` 参数。
+#[derive(Parser, Debug)]
+pub struct ServeArgs {
+    /// 监听 host:port (默认 127.0.0.1:7780, 仅本机访问保证安全)。
+    #[arg(long, default_value = "127.0.0.1:7780")]
+    pub bind: String,
 }
 
 /// `frank orchestrator demo` 参数。
@@ -56,8 +66,14 @@ pub fn run(args: Args) -> Result<()> {
         match args.command {
             OrchestratorCommand::Demo(d) => run_demo(d).await,
             OrchestratorCommand::Providers => run_providers().await,
+            OrchestratorCommand::Serve(s) => run_serve(s).await,
         }
     })
+}
+
+async fn run_serve(args: ServeArgs) -> Result<()> {
+    let addr: std::net::SocketAddr = args.bind.parse()?;
+    crate::cli::orchestrator_server::serve(addr).await
 }
 
 async fn run_demo(args: DemoArgs) -> Result<()> {

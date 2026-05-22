@@ -24,6 +24,7 @@ pub mod install;
 pub mod list;
 pub mod memory;
 pub mod orchestrator;
+pub mod orchestrator_server;
 pub mod scan;
 pub mod uninstall;
 
