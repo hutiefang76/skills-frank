@@ -156,9 +156,9 @@ v0.5 (对的):
 | 1 (slash 命名空间) | 散装 7 SKILL.md, 命名 `frank-ask-*` / `frank-mem-*` | Plugin 化, 命名 `frank:ask-*` / `frank:mem-*` (跟 anthropic-skills:* 同款) |
 | 2 (mem slash) | ✅ frank-mem-list + frank-mem-search 已装 | Plugin 化重命名 |
 | 3 (Web UI 三入口) | orchestrator UI 只 Job 看板 | 加 skills 管理 + memory 浏览面板 |
-| 4 (daemon 自启) | ❌ 还要用户手动 `serve` | launchd + systemd + Windows 服务三套 + `frank` 命令打开浏览器 |
+| 4 (daemon 自启) | ✅ v0.5 macOS launchd 落地: `frank daemon install` + 裸 `frank` 直开浏览器 | systemd user unit + Windows 服务留 v0.6 |
 | 5 (真列表) | ✅ builtin.yaml 已修正名字 + 注释 3 个未发的 | 等 doris-ops / feishu-read / dolphinscheduler-ops git 仓真发 |
-| 6 (扫 MCP) | ✅ scan 扫 skills 目录 / ❌ 不扫 MCP 配置 | `frank scan --mcp` + `frank import-mcp` |
+| 6 (扫 MCP) | ✅ v0.4.4 `frank scan --mcp` 落地 (实测 12 external MCP) | `frank import-mcp <name>` 收编 |
 | 7 (装管 ≠ slash) | ✅ 文档化 | — |
 | 8 (slash = 使用) | ✅ 文档化 | — |
 | skill 自含 | ✅ ADR 写入硬规约 / ❌ 仓库还没真自含 | 你 push doris-ops 等仓库时按这规约写 |

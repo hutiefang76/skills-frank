@@ -14,7 +14,7 @@
 //!
 //! # 跟 OpenAI 客户端的区别
 //!
-//! [`crate::embed::openai::OpenAIEmbedder`] 需要 `OPENAI_API_KEY`, 按 token 计费.
+//! [`frank_memory::embed::openai::OpenAIEmbedder`] 需要 `OPENAI_API_KEY`, 按 token 计费.
 //! `LocalEmbedder` **零依赖外部 service**, **零 token 成本**, 但维度更小 (384 vs 1536),
 //! 质量略低 (BAAI/bge ~ OpenAI text-embedding-3-small 的 85-90%).
 

@@ -9,7 +9,7 @@
 //! # 写入策略
 //!
 //! 用户 `~/.claude.json` 可能含项目历史、设备 token 等关键数据 (实测可达 200K 行).
-//! frank 必须**只增/删 mcpServers.<name> 一项**, 不动其他字段. 实现:
+//! frank 必须**只增/删 `mcpServers.<name>` 一项**, 不动其他字段. 实现:
 //! 1. read 整文件 → serde_json::Value
 //! 2. `value["mcpServers"][name] = { command, args, env }`
 //! 3. 原子写: tmp + rename

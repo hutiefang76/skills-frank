@@ -108,6 +108,29 @@ frank scan            # 扫本机三平台 skills 目录
 frank list            # 列 manifest 里的 skills
 ```
 
+### daemon 自启 + Web UI (v0.5 新增, macOS launchd)
+
+`frank` 设计上是后台 daemon: 注册 launchd 一次就**永远在跑** (登录自启, 挂了自动重启),
+日常你只敲 `frank` (无参数) 自动开浏览器到 Web UI。**不用再手动 `orchestrator serve` 阻塞终端**。
+
+```bash
+# 装一次 (写 ~/Library/LaunchAgents/com.frank.orchestrator.plist + 立刻起)
+frank daemon install              # 默认 127.0.0.1:7780
+frank daemon install --port 7799  # 自定义端口
+
+# 日常用
+frank                             # 无参数: 自动开浏览器到 daemon URL
+frank daemon status               # 看 PID + 端口
+frank daemon stop / start         # KeepAlive=true, stop 后会自动拉起
+frank daemon uninstall            # 移除 launchd 注册 + 删 plist
+
+# 日志
+tail -f ~/.frank/logs/orchestrator.out.log
+```
+
+> **Linux / Windows**: v0.5 仅 macOS launchd 真接, systemd user unit + Windows 服务留 v0.6。
+> 临时跑可继续用 `frank orchestrator serve --bind 127.0.0.1:7780` (阻塞终端)。
+
 ### 安装 skill
 
 ```bash
