@@ -1,0 +1,10 @@
+{
+  "name": "frank",
+  "version": "0.4.2",
+  "description": "frank — AI 工具链治理 plugin. 用户原话用 /frank:ask-gpt /frank:ask-claude /frank:mem-list 等斜杠命令触发跨 AI 协作 + 记忆管理. 装 / 卸 / 同步 skills 走 `frank` CLI (跟 plugin 配套).",
+  "author": {"name": "hutiefang", "email": "hutiefang@icloud.com"},
+  "homepage": "https://github.com/hutiefang76/skills-frank",
+  "repository": "https://github.com/hutiefang76/skills-frank",
+  "license": "MIT",
+  "keywords": ["frank", "ai-bridge", "memory", "skill-management", "multi-ai", "claude-codex-opencode"]
+}

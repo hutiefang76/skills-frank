@@ -75,46 +75,44 @@ skills:
 
   # ═══════════════════════════════════════════════════════════════
   # frank-own — 芳哥 (hutiefang76) 自研开源 skills
+  #
+  # 自含原则 (v0.5 加入): 每个 frank-own skill 仓库必须**自带** 全部依赖 + setup
+  # 脚本 (Python venv / npm install / 配置模板). frank install 只做"clone +
+  # symlink 到 ~/.{claude,codex,opencode}/skills/", **不解析 dependencies**.
+  # 这样 skills 跟项目主仓 (skills-frank) 完全解耦, 不会因 kdwl 私有仓 / 内部
+  # 工具变化而连带破坏 frank.
+  #
+  # 用户原话: "frank-skills 只是辅助安装和管理".
   # ═══════════════════════════════════════════════════════════════
 
-  - name: doris-ops
-    description: TCHouse-D (Doris) 运维 (查表/性能/扩容)
+  - name: nacos-ops
+    description: Nacos 配置中心查询/修改 (用户自己机器跑 — 依赖 mysql-connector-python, setup 见 skill 内 install.sh)
     source:
       type: git
-      url: https://github.com/hutiefang76/skills-doris-ops.git
-    visibility: frank-own
-    dependencies:
-      python: ["mysql-connector-python>=8.0"]
-    health_check:
-      cmd: "python -c 'import mysql.connector'"
-      timeout_seconds: 5
-
-  - name: feishu-read
-    description: 飞书文档/表格/Excel/PDF 提取
-    source:
-      type: git
-      url: https://github.com/hutiefang76/skills-feishu-read.git
-    visibility: frank-own
-    dependencies:
-      python: ["pdfplumber", "openpyxl"]
-
-  - name: nacos-config
-    description: Nacos 配置中心查询/修改
-    source:
-      type: git
-      url: https://github.com/hutiefang76/skills-nacos-config.git
-    visibility: frank-own
-
-  - name: dolphinscheduler-ops
-    description: DolphinScheduler 任务运维 (查询/重跑/暂停)
-    source:
-      type: git
-      url: https://github.com/hutiefang76/skills-dolphinscheduler-ops.git
+      url: https://github.com/hutiefang76/skills-nacos-ops.git
     visibility: frank-own
 
   - name: streampark-ops
-    description: StreamPark Flink 作业管理 (提交/启停/查日志)
+    description: StreamPark Flink 作业管理 (提交/启停/查日志) — 依赖见 skill 内 SKILL.md
     source:
       type: git
       url: https://github.com/hutiefang76/skills-streampark-ops.git
     visibility: frank-own
+
+  # ── 以下 3 个 skill 仓库还没发布 (404), 留占位等你 push 仓库后启用 ──
+  # 启用方法: 把对应 git url 仓库真发到 GitHub, 然后取消下方注释
+  #
+  # - name: doris-ops
+  #   description: TCHouse-D (Doris) 运维 (查表/性能/扩容)
+  #   source: { type: git, url: https://github.com/hutiefang76/skills-doris-ops.git }
+  #   visibility: frank-own
+  #
+  # - name: feishu-read
+  #   description: 飞书文档/表格/Excel/PDF 提取
+  #   source: { type: git, url: https://github.com/hutiefang76/skills-feishu-read.git }
+  #   visibility: frank-own
+  #
+  # - name: dolphinscheduler-ops
+  #   description: DolphinScheduler 任务运维 (查询/重跑/暂停)
+  #   source: { type: git, url: https://github.com/hutiefang76/skills-dolphinscheduler-ops.git }
+  #   visibility: frank-own
