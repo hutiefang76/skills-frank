@@ -17,6 +17,7 @@ use clap::{Parser, Subcommand};
 // 各子命令模块声明 (P0 day3-4: install / uninstall / enable / disable / list 已落地)
 pub mod dedupe;
 pub mod disable;
+pub mod doctor;
 pub mod enable;
 pub mod import;
 pub mod install;
@@ -80,13 +81,14 @@ enum Commands {
     /// 检测并清理同名 skill 在多平台 target 不一致的重复安装。
     Dedupe(dedupe::Args),
 
+    /// 环境健康检查 (toolchain / 配置 / 三平台目录 / state 漂移 / sync-agent)。
+    Doctor(doctor::Args),
+
     // ----- 以下为占位, P1 实现 -----
     /// 升级到最新版本 (P1 待实现)。
     Update,
     /// 回滚到上一个 snapshot (P1 待实现)。
     Rollback,
-    /// 健康检查 (P1 待实现)。
-    Doctor,
 }
 
 /// CLI 入口 dispatcher。
@@ -107,9 +109,9 @@ pub fn run() -> Result<()> {
         Commands::Scan(args) => scan::run(args),
         Commands::Import(args) => import::run(args),
         Commands::Dedupe(args) => dedupe::run(args),
+        Commands::Doctor(args) => doctor::run(args),
         Commands::Update => stub("update"),
         Commands::Rollback => stub("rollback"),
-        Commands::Doctor => stub("doctor"),
     }
 }
 

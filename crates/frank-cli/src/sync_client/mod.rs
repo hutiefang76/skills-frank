@@ -11,7 +11,7 @@
 //! 1. 显式构造时传入的 `base_url`
 //! 2. 环境变量 `FRANK_SYNC_AGENT_URL`
 //! 3. `~/.frank/config.toml` 中 `[sync] agent_url = "..."`
-//! 4. 缺省 `http://frank.hutiefang.com:8318`
+//! 4. 缺省 `https://frank.hutiefang.com` (1Panel openresty :443 反代)
 //!
 //! 错误处理: API 非 2xx 时把响应 JSON 中的 `error` 字段提到 `anyhow::Error`
 //! 用户消息里, 而不是吞掉只显示 status code。

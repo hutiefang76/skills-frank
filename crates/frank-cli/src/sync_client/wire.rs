@@ -8,8 +8,8 @@ use anyhow::{anyhow, Context, Result};
 use frank_memory::{MemoryId, MemoryMatch, MemoryRecord, Scope};
 use serde::{Deserialize, Serialize};
 
-/// 默认 sync-agent base URL (生产 caddy 反代地址)。
-pub const DEFAULT_BASE_URL: &str = "http://frank.hutiefang.com:8318";
+/// 默认 sync-agent base URL (生产 1Panel openresty :443 反代地址, 无端口 HTTPS)。
+pub const DEFAULT_BASE_URL: &str = "https://frank.hutiefang.com";
 
 // ---- 请求 / 响应 wire 结构 (与 sync-agent routes.rs 对称) ----
 
