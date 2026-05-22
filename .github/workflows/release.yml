@@ -61,11 +61,14 @@ jobs:
 
       - name: Build release
         shell: bash
+        # 仅 build frank-cli (-p frank) — sync-agent 含 fastembed/ort-sys, 在
+        # x86_64-apple-darwin + aarch64-linux 上没 prebuilt onnxruntime, 默认 build
+        # workspace 全部会挂. sync-agent 只跑 docker 服务端, 不跨平台分发.
         run: |
           if [[ "${{ matrix.cross }}" == "true" ]]; then
-            cross build --release --target ${{ matrix.target }}
+            cross build --release -p frank --target ${{ matrix.target }}
           else
-            cargo build --release --target ${{ matrix.target }}
+            cargo build --release -p frank --target ${{ matrix.target }}
           fi
 
       - name: Package (Unix)
