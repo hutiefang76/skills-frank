@@ -15,6 +15,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 // 各子命令模块声明 (P0 day3-4: install / uninstall / enable / disable / list 已落地)
+pub mod ai;
 pub mod dedupe;
 pub mod disable;
 pub mod doctor;
@@ -89,6 +90,9 @@ enum Commands {
     /// P6 多 Agent 协作: 真接本机 claude/codex/opencode CLI (Milestone 1)。
     Orchestrator(orchestrator::Args),
 
+    /// AI 一问一答桥 — `frank ai ask --to <provider> <prompt>`,转发给目标 CLI 拿回答。
+    Ai(ai::Args),
+
     // ----- 以下为占位, P1 实现 -----
     /// 升级到最新版本 (P1 待实现)。
     Update,
@@ -116,6 +120,7 @@ pub fn run() -> Result<()> {
         Commands::Dedupe(args) => dedupe::run(args),
         Commands::Doctor(args) => doctor::run(args),
         Commands::Orchestrator(args) => orchestrator::run(args),
+        Commands::Ai(args) => ai::run(args),
         Commands::Update => stub("update"),
         Commands::Rollback => stub("rollback"),
     }
