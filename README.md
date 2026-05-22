@@ -32,25 +32,46 @@ Frank 是一个 CLI 工具，帮你在多台设备 + 多个 AI CLI 之间统一�
 - 🟢 **P5 (frank-memory)** — 进行中：mem0 同思路 Rust 重写,骨架 + 14 单测全绿
 - ⚪ **P6 (frank-orchestrator)** — 设计完成 (ADR-004),实现待启动
 
-## 快速上手（P0 已完成）
+## 快速上手
 
-### 安装(三选一)
+### 安装
+
+**推荐 — 一键脚本** (自动选最快路径:先尝试下预编译 binary,失败再 cargo build)
 
 ```bash
-# 选 1: 一键脚本 (推荐, 自动检测代理 / 装 Rust toolchain / build)
 curl -fsSL https://raw.githubusercontent.com/hutiefang76/skills-frank/main/install.sh | bash
-
-# 选 2: git clone + cargo install (开发者熟悉)
-git clone https://github.com/hutiefang76/skills-frank.git
-cd skills-frank
-cargo install --path crates/frank-cli --locked
-
-# 选 3: 直接 cargo run (临时玩玩, 不全局装)
-cd skills-frank
-cargo run -- doctor
 ```
 
-> **不要用** `cargo install frank` / `brew install frank` — 那是 P1 后才上线的发布渠道,**当前 crates.io / homebrew-tap 都没发**。
+**或手动下预编译 binary** (无需 Rust toolchain)
+
+到 [Releases](https://github.com/hutiefang76/skills-frank/releases/latest) 下对应平台的包,解压把 `frank` 丢进 `$PATH`:
+
+| 平台 | archive |
+|---|---|
+| macOS (Apple Silicon) | `frank-v0.1.0-aarch64-apple-darwin.tar.gz` |
+| macOS (Intel) | `frank-v0.1.0-x86_64-apple-darwin.tar.gz` |
+| Linux x86_64 | `frank-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux aarch64 | `frank-v0.1.0-aarch64-unknown-linux-gnu.tar.gz` |
+| Windows x86_64 | `frank-v0.1.0-x86_64-pc-windows-msvc.zip` |
+| Windows aarch64 | `frank-v0.1.0-aarch64-pc-windows-msvc.zip` |
+
+例 (macOS Apple Silicon):
+```bash
+curl -fsSL https://github.com/hutiefang76/skills-frank/releases/latest/download/frank-v0.1.0-aarch64-apple-darwin.tar.gz | tar xz
+sudo install -m 755 frank /usr/local/bin/    # 或: mv frank ~/.local/bin/
+frank doctor                                 # 验证安装
+```
+
+**仅开发者** — 源码 build (修代码 / 跑测试)
+
+```bash
+git clone https://github.com/hutiefang76/skills-frank.git
+cd skills-frank
+cargo install --path crates/frank-cli --locked    # 全局装
+# 或 cargo run -- doctor                          # 不装直接跑
+```
+
+> ⚠️ `cargo install frank` / `brew install frank` / `npm i -g @hutiefang/frank-cli` **目前都不可用** — 这些发布渠道留到 P1 (crates.io 要先解 path deps;homebrew-tap 待建)。
 
 ### 验证安装
 

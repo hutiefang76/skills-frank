@@ -16,8 +16,13 @@
 
 set -eo pipefail
 
-readonly REPO_URL="https://github.com/hutiefang76/skills-frank.git"
+readonly REPO_OWNER="hutiefang76"
+readonly REPO_NAME="skills-frank"
+readonly REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
+readonly RELEASES_API="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+readonly RELEASES_DL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases"
 readonly INSTALL_DIR="${FRANK_INSTALL_DIR:-$HOME/.frank-src}"
+readonly BIN_DIR="${FRANK_BIN_DIR:-$HOME/.local/bin}"
 
 # ─── 着色 + log ─────────────────────────────────────────────
 c_green=$'\033[0;32m'; c_yellow=$'\033[1;33m'; c_red=$'\033[0;31m'; c_blue=$'\033[0;34m'; c_reset=$'\033[0m'
@@ -103,8 +108,80 @@ CFG
   fi
 }
 
-# ─── 4. clone + build + install ────────────────────────────
-install_frank() {
+# ─── 4a. 优先: 下预编译 binary ──────────────────────────────
+# 检测 OS + arch 对应 release.yml 的 target triple, curl latest release
+# 失败 (404 / 无网络 / 没匹配 target) 自动 fallback 到 4b cargo build
+detect_target() {
+  local os arch
+  case "$(uname -s)" in
+    Darwin)  os=apple-darwin ;;
+    Linux)   os=unknown-linux-gnu ;;
+    MINGW*|MSYS*|CYGWIN*) os=pc-windows-msvc ;;
+    *) return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch=x86_64 ;;
+    arm64|aarch64) arch=aarch64 ;;
+    *) return 1 ;;
+  esac
+  echo "${arch}-${os}"
+}
+
+try_install_binary() {
+  local target
+  target=$(detect_target) || { warn "未识别的 OS/arch, 跳过 binary, fallback build"; return 1; }
+  say "尝试下载预编译 binary (target: $target)"
+
+  # 拉 latest release json, 提取该 target 的 .tar.gz / .zip 直链
+  local tag asset_url ext
+  tag=$(curl -fsSL "$RELEASES_API" 2>/dev/null | grep -oE '"tag_name": *"[^"]+"' | head -1 | cut -d'"' -f4)
+  if [[ -z "$tag" ]]; then
+    warn "GitHub Release API 不可达 (或本仓还未发布); fallback build"
+    return 1
+  fi
+  ok "最新 release tag: $tag"
+
+  if [[ "$target" == *windows* ]]; then ext="zip"; else ext="tar.gz"; fi
+  asset_url="${RELEASES_DL}/download/${tag}/frank-${tag}-${target}.${ext}"
+
+  local tmp; tmp=$(mktemp -d)
+  trap "rm -rf '$tmp'" RETURN
+  if ! curl -fsSL "$asset_url" -o "$tmp/frank.${ext}"; then
+    warn "下载 $asset_url 失败 (该 target 可能没出包); fallback build"
+    return 1
+  fi
+
+  # 解包
+  if [[ "$ext" == "zip" ]]; then
+    (cd "$tmp" && unzip -q frank.zip)
+  else
+    (cd "$tmp" && tar xzf frank.tar.gz)
+  fi
+  local binname=frank
+  [[ "$target" == *windows* ]] && binname=frank.exe
+  if [[ ! -f "$tmp/$binname" ]]; then
+    warn "解包后未找到 $binname (archive 结构异常); fallback build"
+    return 1
+  fi
+
+  mkdir -p "$BIN_DIR"
+  install -m 755 "$tmp/$binname" "$BIN_DIR/$binname"
+  ok "binary 安装到 $BIN_DIR/$binname"
+
+  # PATH 提醒
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *)
+      warn "$BIN_DIR 不在 PATH; 加到 shell rc:"
+      echo "    echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc   # 或 ~/.bashrc"
+      ;;
+  esac
+  return 0
+}
+
+# ─── 4b. fallback: clone + cargo build ─────────────────────
+install_frank_from_source() {
+  # 需要 cargo, 由 ensure_rust 保证
   if [[ -d "$INSTALL_DIR/.git" ]]; then
     say "本地已有源码 ($INSTALL_DIR), git pull 更新"
     (cd "$INSTALL_DIR" && git pull --rebase --autostash) || warn "git pull 失败, 继续用现有版本"
@@ -116,6 +193,15 @@ install_frank() {
   say "cargo install (release, 走 git2 vendored, 首次 ~3 min)"
   cargo install --path "$INSTALL_DIR/crates/frank-cli" --locked
   ok "frank 装好: $(command -v frank)"
+}
+
+install_frank() {
+  if try_install_binary; then
+    return
+  fi
+  ensure_rust
+  ensure_cargo_mirror
+  install_frank_from_source
 }
 
 # ─── 5. 初始化 ~/.frank ─────────────────────────────────────
@@ -141,8 +227,8 @@ main() {
   echo
 
   detect_proxy
-  ensure_cargo_mirror
-  ensure_rust
+  # 注: ensure_rust / ensure_cargo_mirror 只在 binary 下载失败、需要本地 build 时才调用
+  # (install_frank 内部判断), 避免给纯下载用户拉 Rust toolchain.
   install_frank
   init_frank_home
 
