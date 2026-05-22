@@ -73,16 +73,16 @@ curl -fsSL https://raw.githubusercontent.com/hutiefang76/skills-frank/main/insta
 
 | 平台 | archive |
 |---|---|
-| macOS (Apple Silicon) | `frank-v0.2.0-aarch64-apple-darwin.tar.gz` |
-| macOS (Intel) | `frank-v0.2.0-x86_64-apple-darwin.tar.gz` |
-| Linux x86_64 | `frank-v0.2.0-x86_64-unknown-linux-gnu.tar.gz` |
-| Linux aarch64 | `frank-v0.2.0-aarch64-unknown-linux-gnu.tar.gz` |
-| Windows x86_64 | `frank-v0.2.0-x86_64-pc-windows-msvc.zip` |
-| Windows aarch64 | `frank-v0.2.0-aarch64-pc-windows-msvc.zip` |
+| macOS (Apple Silicon) | `frank-v0.4.0-aarch64-apple-darwin.tar.gz` |
+| macOS (Intel) | `frank-v0.4.0-x86_64-apple-darwin.tar.gz` |
+| Linux x86_64 | `frank-v0.4.0-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux aarch64 | `frank-v0.4.0-aarch64-unknown-linux-gnu.tar.gz` |
+| Windows x86_64 | `frank-v0.4.0-x86_64-pc-windows-msvc.zip` |
+| Windows aarch64 | `frank-v0.4.0-aarch64-pc-windows-msvc.zip` |
 
 例 (macOS Apple Silicon):
 ```bash
-curl -fsSL https://github.com/hutiefang76/skills-frank/releases/latest/download/frank-v0.2.0-aarch64-apple-darwin.tar.gz | tar xz
+curl -fsSL https://github.com/hutiefang76/skills-frank/releases/latest/download/frank-v0.4.0-aarch64-apple-darwin.tar.gz | tar xz
 sudo install -m 755 frank /usr/local/bin/    # 或: mv frank ~/.local/bin/
 frank doctor                                 # 验证安装
 ```
