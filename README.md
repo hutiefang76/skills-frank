@@ -34,19 +34,37 @@ Frank 是一个 CLI 工具，帮你在多台设备 + 多个 AI CLI 之间统一�
 
 ## 快速上手（P0 已完成）
 
+### 安装(三选一)
+
 ```bash
-# 安装
-cargo install frank
-# 或: brew install frank / scoop install frank / npm i -g @hutiefang/frank-cli
+# 选 1: 一键脚本 (推荐, 自动检测代理 / 装 Rust toolchain / build)
+curl -fsSL https://raw.githubusercontent.com/hutiefang76/skills-frank/main/install.sh | bash
 
-# 列出已知 skills
-frank list
+# 选 2: git clone + cargo install (开发者熟悉)
+git clone https://github.com/hutiefang76/skills-frank.git
+cd skills-frank
+cargo install --path crates/frank-cli --locked
 
-# 安装一个公开 skill
-frank install doris-ops
+# 选 3: 直接 cargo run (临时玩玩, 不全局装)
+cd skills-frank
+cargo run -- doctor
+```
 
-# 安装公司 skill (需 SSH + VPN)
-frank install kdwl:vehicle-events
+> **不要用** `cargo install frank` / `brew install frank` — 那是 P1 后才上线的发布渠道,**当前 crates.io / homebrew-tap 都没发**。
+
+### 验证安装
+
+```bash
+frank doctor          # 11 项环境健康检查 (toolchain / ~/.frank/ / 三平台目录 / sync-agent)
+frank scan            # 扫本机三平台 skills 目录
+frank list            # 列 manifest 里的 skills
+```
+
+### 安装 skill
+
+```bash
+frank install doris-ops               # 公开 skill (manifest/public.yaml)
+frank install kdwl:vehicle-events     # 公司 skill (~/.frank/manifests/, SSH + VPN)
 ```
 
 ### memory 子命令（P5 进行中,需 sync-agent 在线）
