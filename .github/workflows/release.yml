@@ -156,22 +156,9 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
 
-  # ---- 发布到 crates.io (可选, 需配 CARGO_REGISTRY_TOKEN secret) ----
-  publish-crates:
-    name: Publish to crates.io
-    needs: release
-    runs-on: ubuntu-latest
-    if: ${{ !contains(github.ref_name, '-') }} # 仅正式版本
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "::warning::CARGO_REGISTRY_TOKEN not set, skip crates.io publish"
-            exit 0
-          fi
-          cargo publish --token "$CARGO_REGISTRY_TOKEN"
-        continue-on-error: true
+  # ---- crates.io publish 已禁用 ----
+  # 原因:
+  # 1. crates.io 上 "frank" 这个 crate name 早在 2019 年被别人占了 (https://crates.io/crates/frank)
+  # 2. 即便有 token, cargo publish 也会因 name conflict 直接报错
+  # 3. P1 决定改名 (如 frank-cli) 或走 brew / 自建 registry 之前, 这个 job 没意义
+  # 之前版本的 publish job 在没 token 时 exit 0 + continue-on-error 装作成功, 误导.

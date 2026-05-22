@@ -71,7 +71,9 @@ cargo install --path crates/frank-cli --locked    # 全局装
 # 或 cargo run -- doctor                          # 不装直接跑
 ```
 
-> ⚠️ `cargo install frank` / `brew install frank` / `npm i -g @hutiefang/frank-cli` **目前都不可用** — 这些发布渠道留到 P1 (crates.io 要先解 path deps;homebrew-tap 待建)。
+> ⚠️ `cargo install frank` **永久不可用** — crates.io 上 `frank` 这个名字早在 2019 年被别人占了 (跟本项目无关)。发布到 crates.io 需要改名 (如 `frank-cli`),P1 决定。
+>
+> ⚠️ `brew install frank` / `npm i -g @hutiefang/frank-cli` 也不可用 — homebrew-tap / npm wrapper 留到 P1。
 
 ### 验证安装
 
