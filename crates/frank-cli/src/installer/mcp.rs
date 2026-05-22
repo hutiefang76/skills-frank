@@ -85,6 +85,69 @@ pub fn uninstall_claude(name: &str) -> Result<()> {
     atomic_write_json(&path, &root)
 }
 
+/// 列出 Claude `~/.claude.json` `mcpServers` 全部条目 (name, command, args)。
+/// 用于 `frank scan --mcp` 扫描.
+pub fn list_claude() -> Result<Vec<McpEntry>> {
+    let path = claude_config_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let root = read_json_or_empty(&path)?;
+    let Some(servers) = root.get("mcpServers").and_then(Value::as_object) else {
+        return Ok(Vec::new());
+    };
+    Ok(servers
+        .iter()
+        .map(|(name, cfg)| McpEntry {
+            name: name.clone(),
+            command: cfg
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("?")
+                .to_string(),
+            args: cfg
+                .get("args")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+            env: HashMap::new(),
+        })
+        .collect())
+}
+
+/// 列出 codex `~/.codex/config.toml` `[mcp_servers.*]` 全部条目。
+pub fn list_codex() -> Result<Vec<McpEntry>> {
+    let path = codex_config_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let root = read_toml_or_empty(&path)?;
+    let Some(servers) = root.get("mcp_servers").and_then(toml::Value::as_table) else {
+        return Ok(Vec::new());
+    };
+    Ok(servers
+        .iter()
+        .map(|(name, cfg)| McpEntry {
+            name: name.clone(),
+            command: cfg
+                .get("command")
+                .and_then(toml::Value::as_str)
+                .unwrap_or("?")
+                .to_string(),
+            args: cfg
+                .get("args")
+                .and_then(toml::Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            env: HashMap::new(),
+        })
+        .collect())
+}
+
 /// 看 Claude `~/.claude.json` 里 `mcpServers.<name>` 是否存在。
 #[must_use]
 pub fn claude_installed(name: &str) -> bool {

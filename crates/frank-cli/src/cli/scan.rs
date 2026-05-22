@@ -22,6 +22,11 @@ pub struct Args {
     /// 仅显示状态为 external 的条目 (用户手工装的)。
     #[arg(long)]
     pub external_only: bool,
+
+    /// 同时扫 MCP 配置文件 (~/.claude.json mcpServers + ~/.codex/config.toml [mcp_servers.*])
+    /// 显示**所有**注册的 MCP server (含 frank 装前 / 非 frank 装的, 用户原话 Q6).
+    #[arg(long)]
+    pub mcp: bool,
 }
 
 #[derive(Tabled)]
@@ -48,6 +53,13 @@ pub fn run(args: Args) -> Result<()> {
     tracing::debug!(?args, "scan invoked");
 
     let state = State::load_default()?;
+
+    // ─── v0.4.3 Q6: 扫 MCP 配置 (用户原话 "托管 frank 装前的 MCP") ───
+    if args.mcp {
+        scan_mcp(&state)?;
+        // --mcp 单独跑, 不再做 skills 扫描 (用户要么 frank scan 看 skills 要么 --mcp 看 MCP)
+        return Ok(());
+    }
 
     let all = if let Some(p) = args.platform.as_deref() {
         let plat = parse_platform(p)?;
@@ -102,6 +114,80 @@ fn parse_platform(s: &str) -> Result<Platform> {
         other => Err(anyhow!(
             "unknown platform `{other}`; expected one of: claude / codex / opencode"
         )),
+    }
+}
+
+/// `frank scan --mcp`: 扫两平台 MCP 配置文件, 列出全部 MCP server + 标记
+/// 哪个由 frank 管理 (state.json source_ref=="mcp") vs external.
+fn scan_mcp(state: &State) -> Result<()> {
+    let claude = crate::installer::mcp::list_claude().unwrap_or_default();
+    let codex = crate::installer::mcp::list_codex().unwrap_or_default();
+
+    if claude.is_empty() && codex.is_empty() {
+        crate::log::ui::info("no MCP servers configured (~/.claude.json 与 ~/.codex/config.toml 都没找到 mcpServers)");
+        return Ok(());
+    }
+
+    #[derive(Tabled)]
+    struct McpRow {
+        platform: String,
+        name: String,
+        status: String,
+        command: String,
+    }
+
+    let mut rows: Vec<McpRow> = Vec::new();
+    for entry in &claude {
+        let status = mcp_status(&entry.name, state);
+        rows.push(McpRow {
+            platform: "claude".into(),
+            name: entry.name.clone(),
+            status,
+            command: format!(
+                "{} {}",
+                entry.command,
+                entry.args.join(" ").chars().take(50).collect::<String>()
+            ),
+        });
+    }
+    for entry in &codex {
+        let status = mcp_status(&entry.name, state);
+        rows.push(McpRow {
+            platform: "codex".into(),
+            name: entry.name.clone(),
+            status,
+            command: format!(
+                "{} {}",
+                entry.command,
+                entry.args.join(" ").chars().take(50).collect::<String>()
+            ),
+        });
+    }
+    rows.sort_by_key(|r| (r.platform.clone(), r.name.clone()));
+
+    crate::log::ui::section(&format!("MCP servers ({} total)", rows.len()));
+    println!("{}", Table::new(rows));
+
+    let total_external = claude
+        .iter()
+        .chain(codex.iter())
+        .filter(|e| matches!(mcp_status(&e.name, state).as_str(), "external"))
+        .count();
+    if total_external > 0 {
+        crate::log::ui::info(&format!(
+            "{total_external} external MCP — frank 未管理 (装 frank 前 / 手动加 / 其他工具加的)"
+        ));
+        crate::log::ui::info("用 `frank import-mcp <name>` 收编进 frank (v0.5 todo, 现在手动加 manifest)");
+    }
+    Ok(())
+}
+
+/// 判断 MCP 是不是由 frank install 装的 (state.json 含同名 + source_ref=mcp)。
+fn mcp_status(name: &str, state: &State) -> String {
+    match state.get(name) {
+        Some(s) if s.source_ref == "mcp" => "managed".to_string(),
+        Some(_) => "managed-but-not-mcp".to_string(), // 名字撞了
+        None => "external".to_string(),
     }
 }
 
