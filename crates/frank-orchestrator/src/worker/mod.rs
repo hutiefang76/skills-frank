@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 
 use crate::job::{Step, StepOutput};
 
+pub mod local;
 pub mod rest;
 
 /// Worker 注册名 (例如 "claude" / "openai" / "codex-local")。
@@ -101,6 +102,18 @@ impl LogLine {
     #[must_use]
     pub fn error(message: impl Into<String>) -> Self {
         Self::now(LogLevel::Error, message)
+    }
+
+    /// `Warn` 级简写。
+    #[must_use]
+    pub fn warn(message: impl Into<String>) -> Self {
+        Self::now(LogLevel::Warn, message)
+    }
+
+    /// 指定 level (`now()` 别名, 命名更直观)。
+    #[must_use]
+    pub fn new(level: LogLevel, message: impl Into<String>) -> Self {
+        Self::now(level, message)
     }
 }
 

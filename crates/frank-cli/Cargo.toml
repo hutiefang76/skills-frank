@@ -74,6 +74,16 @@ toml = "0.8"
 # 走 path 依赖, 不上 crates.io
 frank-memory = { path = "../frank-memory" }
 
+# frank-orchestrator 真接: P6 Milestone 1 加 `frank orchestrator demo` 子命令
+# 启 tokio runtime 跑 LocalCliWorker (subprocess + stdin/stdout 包 claude/codex/opencode)
+frank-orchestrator = { path = "../frank-orchestrator" }
+
+# tokio runtime: orchestrator 子命令需要 (frank-cli 主体仍 blocking, 仅这一条 async)
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+# orchestrator providers 子命令: PATH 里查 CLI binary
+which = "7.0"
+
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"

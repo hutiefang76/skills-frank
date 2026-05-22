@@ -23,6 +23,7 @@ pub mod import;
 pub mod install;
 pub mod list;
 pub mod memory;
+pub mod orchestrator;
 pub mod scan;
 pub mod uninstall;
 
@@ -84,6 +85,9 @@ enum Commands {
     /// 环境健康检查 (toolchain / 配置 / 三平台目录 / state 漂移 / sync-agent)。
     Doctor(doctor::Args),
 
+    /// P6 多 Agent 协作: 真接本机 claude/codex/opencode CLI (Milestone 1)。
+    Orchestrator(orchestrator::Args),
+
     // ----- 以下为占位, P1 实现 -----
     /// 升级到最新版本 (P1 待实现)。
     Update,
@@ -110,6 +114,7 @@ pub fn run() -> Result<()> {
         Commands::Import(args) => import::run(args),
         Commands::Dedupe(args) => dedupe::run(args),
         Commands::Doctor(args) => doctor::run(args),
+        Commands::Orchestrator(args) => orchestrator::run(args),
         Commands::Update => stub("update"),
         Commands::Rollback => stub("rollback"),
     }
