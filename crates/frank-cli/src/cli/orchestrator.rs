@@ -190,6 +190,8 @@ fn parse_provider(s: &str) -> Result<CliProvider> {
         "codex" => Ok(CliProvider::Codex),
         "opencode" => Ok(CliProvider::Opencode),
         "gemini" => Ok(CliProvider::Gemini),
-        other => anyhow::bail!("unknown provider `{other}`; 支持 claude / codex / opencode / gemini"),
+        other => {
+            anyhow::bail!("unknown provider `{other}`; 支持 claude / codex / opencode / gemini")
+        }
     }
 }

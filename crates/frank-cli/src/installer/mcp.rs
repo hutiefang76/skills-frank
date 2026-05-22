@@ -76,9 +76,7 @@ pub fn uninstall_claude(name: &str) -> Result<()> {
         return Ok(());
     }
     let mut root = read_json_or_empty(&path)?;
-    if let Some(Value::Object(servers)) = root
-        .as_object_mut()
-        .and_then(|m| m.get_mut("mcpServers"))
+    if let Some(Value::Object(servers)) = root.as_object_mut().and_then(|m| m.get_mut("mcpServers"))
     {
         servers.remove(name);
     }
@@ -108,7 +106,11 @@ pub fn list_claude() -> Result<Vec<McpEntry>> {
             args: cfg
                 .get("args")
                 .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
             env: HashMap::new(),
         })
@@ -212,9 +214,8 @@ pub fn install_codex(entry: &McpEntry) -> Result<()> {
         server.insert("env".to_string(), toml::Value::Table(env_table));
     }
 
-    if let Some(toml::Value::Table(servers)) = root
-        .as_table_mut()
-        .and_then(|m| m.get_mut("mcp_servers"))
+    if let Some(toml::Value::Table(servers)) =
+        root.as_table_mut().and_then(|m| m.get_mut("mcp_servers"))
     {
         servers.insert(entry.name.clone(), toml::Value::Table(server));
     }
@@ -229,9 +230,8 @@ pub fn uninstall_codex(name: &str) -> Result<()> {
         return Ok(());
     }
     let mut root = read_toml_or_empty(&path)?;
-    if let Some(toml::Value::Table(servers)) = root
-        .as_table_mut()
-        .and_then(|m| m.get_mut("mcp_servers"))
+    if let Some(toml::Value::Table(servers)) =
+        root.as_table_mut().and_then(|m| m.get_mut("mcp_servers"))
     {
         servers.remove(name);
     }
@@ -249,8 +249,7 @@ fn read_toml_or_empty(path: &std::path::Path) -> Result<toml::Value> {
     if !path.exists() {
         return Ok(toml::Value::Table(toml::map::Map::new()));
     }
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let content = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     if content.trim().is_empty() {
         return Ok(toml::Value::Table(toml::map::Map::new()));
     }
@@ -260,8 +259,7 @@ fn read_toml_or_empty(path: &std::path::Path) -> Result<toml::Value> {
 fn atomic_write_toml(path: &std::path::Path, value: &toml::Value) -> Result<()> {
     let text = toml::to_string_pretty(value).context("serialize TOML")?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("mkdir {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
     let tmp = path.with_extension("toml.tmp");
     fs::write(&tmp, text).with_context(|| format!("write tmp {}", tmp.display()))?;
@@ -280,8 +278,7 @@ fn read_json_or_empty(path: &std::path::Path) -> Result<Value> {
     if !path.exists() {
         return Ok(json!({}));
     }
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let content = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     if content.trim().is_empty() {
         return Ok(json!({}));
     }

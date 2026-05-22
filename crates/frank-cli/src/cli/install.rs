@@ -160,9 +160,10 @@ fn preflight_external_check(name: &str, force: bool) -> Result<()> {
     let mut platforms: Vec<crate::manifest::schema::Platform> = Vec::new();
     for &p in scanner::ALL_PLATFORMS {
         let scanned = scanner::scan_platform(p, &real_state)?;
-        if scanned.iter().any(|s| {
-            s.name == name && matches!(s.status, scanner::SkillStatus::External)
-        }) {
+        if scanned
+            .iter()
+            .any(|s| s.name == name && matches!(s.status, scanner::SkillStatus::External))
+        {
             platforms.push(p);
         }
     }

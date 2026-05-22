@@ -16,6 +16,7 @@ use clap::{Parser, Subcommand};
 
 // 各子命令模块声明 (P0 day3-4: install / uninstall / enable / disable / list 已落地)
 pub mod ai;
+pub mod daemon;
 pub mod dedupe;
 pub mod disable;
 pub mod doctor;
@@ -42,9 +43,9 @@ pub mod uninstall;
     propagate_version = true,
 )]
 struct Cli {
-    /// 子命令。
+    /// 子命令 (省略时若 daemon 在跑则打开浏览器, 否则提示装 daemon)。
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 
     /// 启用详细日志 (等价于 RUST_LOG=debug)。
     #[arg(short, long, global = true)]
@@ -97,6 +98,9 @@ enum Commands {
     /// 跨设备 skills 同步 — `frank sync push/pull/devices` (用户需求 2.3)。
     Sync(sync::Args),
 
+    /// 后台 daemon 服务管理 — `frank daemon install/start/stop/status` (Q4: 自启 orchestrator)。
+    Daemon(daemon::Args),
+
     // ----- 以下为占位, P1 实现 -----
     /// 升级到最新版本 (P1 待实现)。
     Update,
@@ -112,7 +116,13 @@ pub fn run() -> Result<()> {
     let cli = Cli::parse();
     tracing::debug!(?cli, "parsed CLI args");
 
-    match cli.command {
+    // 用户原话 Q4: 裸 `frank` 不该阻塞终端跑 server, 应该自动打开浏览器到 daemon URL.
+    // 没装 daemon 时给出明确提示让用户跑 `frank daemon install`.
+    let Some(command) = cli.command else {
+        return daemon::open_browser_or_hint();
+    };
+
+    match command {
         Commands::Install(args) => install::run(args),
         Commands::List(args) => list::run(args),
         Commands::Uninstall(args) => uninstall::run(args),
@@ -126,6 +136,7 @@ pub fn run() -> Result<()> {
         Commands::Orchestrator(args) => orchestrator::run(args),
         Commands::Ai(args) => ai::run(args),
         Commands::Sync(args) => sync::run(args),
+        Commands::Daemon(args) => daemon::run(args),
         Commands::Update => stub("update"),
         Commands::Rollback => stub("rollback"),
     }

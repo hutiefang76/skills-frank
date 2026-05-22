@@ -177,7 +177,9 @@ fn scan_mcp(state: &State) -> Result<()> {
         crate::log::ui::info(&format!(
             "{total_external} external MCP — frank 未管理 (装 frank 前 / 手动加 / 其他工具加的)"
         ));
-        crate::log::ui::info("用 `frank import-mcp <name>` 收编进 frank (v0.5 todo, 现在手动加 manifest)");
+        crate::log::ui::info(
+            "用 `frank import-mcp <name>` 收编进 frank (v0.5 todo, 现在手动加 manifest)",
+        );
     }
     Ok(())
 }

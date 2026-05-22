@@ -271,11 +271,14 @@ async fn sync_pull(
     axum::extract::Query(q): axum::extract::Query<SyncPullQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let store = state.skills_sync.read().await;
-    let payload = store.get(&q.device_id).cloned().unwrap_or(serde_json::json!({
-        "schema_version": 1,
-        "profile": "personal",
-        "skills": {}
-    }));
+    let payload = store
+        .get(&q.device_id)
+        .cloned()
+        .unwrap_or(serde_json::json!({
+            "schema_version": 1,
+            "profile": "personal",
+            "skills": {}
+        }));
     Ok(Json(payload))
 }
 

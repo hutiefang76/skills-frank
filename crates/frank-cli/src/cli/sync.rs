@@ -119,10 +119,10 @@ fn run_pull(args: PullArgs) -> Result<()> {
         anyhow::bail!("sync pull failed ({status}): {body}");
     }
 
-    let remote: StateJsonView =
-        serde_json::from_str(&body).context("decode remote state.json")?;
+    let remote: StateJsonView = serde_json::from_str(&body).context("decode remote state.json")?;
     let local = State::load_default()?;
-    let local_names: std::collections::HashSet<&str> = local.iter().map(|s| s.name.as_str()).collect();
+    let local_names: std::collections::HashSet<&str> =
+        local.iter().map(|s| s.name.as_str()).collect();
 
     let missing: Vec<&String> = remote
         .skills
@@ -213,7 +213,9 @@ fn urlencoding(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
             _ => {
                 let _ = write!(out, "%{b:02X}");
             }

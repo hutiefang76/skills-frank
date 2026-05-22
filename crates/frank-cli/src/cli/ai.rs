@@ -190,8 +190,14 @@ mod tests {
     #[test]
     fn parse_provider_aliases() {
         assert!(matches!(parse_provider("gpt").unwrap(), CliProvider::Codex));
-        assert!(matches!(parse_provider("qwen").unwrap(), CliProvider::Opencode));
-        assert!(matches!(parse_provider("Claude").unwrap(), CliProvider::Claude));
+        assert!(matches!(
+            parse_provider("qwen").unwrap(),
+            CliProvider::Opencode
+        ));
+        assert!(matches!(
+            parse_provider("Claude").unwrap(),
+            CliProvider::Claude
+        ));
         assert!(parse_provider("unknown").is_err());
     }
 

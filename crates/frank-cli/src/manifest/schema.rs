@@ -350,7 +350,10 @@ skills:
                 "schema_version: 1\nskills:\n  - name: x\n    source: {{ type: git, url: 'https://example/x.git' }}\n    visibility: {alias}\n"
             );
             let m: Manifest = serde_yml::from_str(&yaml).unwrap();
-            assert_eq!(m.skills[0].visibility, expect, "alias {alias} 应该映射到 {expect:?}");
+            assert_eq!(
+                m.skills[0].visibility, expect,
+                "alias {alias} 应该映射到 {expect:?}"
+            );
         }
     }
 

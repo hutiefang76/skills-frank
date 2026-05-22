@@ -126,7 +126,9 @@ pub async fn serve(addr: SocketAddr) -> Result<()> {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    crate::log::ui::section(&format!("frank orchestrator daemon listening on http://{addr}"));
+    crate::log::ui::section(&format!(
+        "frank orchestrator daemon listening on http://{addr}"
+    ));
     crate::log::ui::info(&format!("→ 浏览器打开 http://{addr}"));
     crate::log::ui::info("→ Ctrl-C 退出");
 
@@ -163,8 +165,8 @@ async fn submit_job(
     State(s): State<AppState>,
     Json(req): Json<SubmitReq>,
 ) -> Result<Json<SubmitResp>, (StatusCode, String)> {
-    let provider = parse_provider(&req.provider)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let provider =
+        parse_provider(&req.provider).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     let worker = LocalCliWorker::new(provider).with_timeout(req.timeout.unwrap_or(300));
     if !worker.health().await {
         return Err((
@@ -254,7 +256,9 @@ async fn get_job(
     // 先拿到 entry 的克隆 (release jobs lock), 再读子字段避免锁嵌套生命周期问题
     let entry = {
         let jobs = s.jobs.read().await;
-        jobs.get(&JobId::from_uuid(id)).cloned().ok_or(StatusCode::NOT_FOUND)?
+        jobs.get(&JobId::from_uuid(id))
+            .cloned()
+            .ok_or(StatusCode::NOT_FOUND)?
     };
     let stdout = entry.stdout.read().await.clone();
     let logs: Vec<LogLineWire> = entry

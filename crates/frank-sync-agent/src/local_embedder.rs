@@ -73,7 +73,6 @@ impl LocalEmbedder {
             dim,
         })
     }
-
 }
 
 #[async_trait]
