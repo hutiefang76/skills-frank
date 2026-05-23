@@ -61,28 +61,39 @@ frank 治理两种来源的 skills:
 
 ### 安装
 
-**推荐 — 一键脚本** (自动选最快路径:先尝试下预编译 binary,失败再 cargo build)
+**macOS / Linux — Homebrew (推荐, v0.5.1+)**
+
+```bash
+brew install hutiefang76/frank/frank
+```
+
+第一次会自动 `brew tap`, 以后 `brew upgrade frank` 自动升最新版。
+跨架构全覆盖: macOS arm64 / x86_64 + Linux arm64 / x86_64。tap 源: <https://github.com/hutiefang76/homebrew-frank>。
+
+**全平台 — 一键脚本** (含 Windows 自动选 .zip)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hutiefang76/skills-frank/main/install.sh | bash
 ```
 
-**或手动下预编译 binary** (无需 Rust toolchain)
+自动选最快路径:先下预编译 binary,失败再 `cargo build`。
 
-到 [Releases](https://github.com/hutiefang76/skills-frank/releases/latest) 下对应平台的包,解压把 `frank` 丢进 `$PATH`:
+**手动 — 从 Release 下 archive** (无网络脚本 / 离线机器友好)
+
+到 [Releases](https://github.com/hutiefang76/skills-frank/releases/latest) 下对应平台:
 
 | 平台 | archive |
 |---|---|
-| macOS (Apple Silicon) | `frank-v0.4.0-aarch64-apple-darwin.tar.gz` |
-| macOS (Intel) | `frank-v0.4.0-x86_64-apple-darwin.tar.gz` |
-| Linux x86_64 | `frank-v0.4.0-x86_64-unknown-linux-gnu.tar.gz` |
-| Linux aarch64 | `frank-v0.4.0-aarch64-unknown-linux-gnu.tar.gz` |
-| Windows x86_64 | `frank-v0.4.0-x86_64-pc-windows-msvc.zip` |
-| Windows aarch64 | `frank-v0.4.0-aarch64-pc-windows-msvc.zip` |
+| macOS (Apple Silicon) | `frank-v<X.Y.Z>-aarch64-apple-darwin.tar.gz` |
+| macOS (Intel) | `frank-v<X.Y.Z>-x86_64-apple-darwin.tar.gz` |
+| Linux x86_64 | `frank-v<X.Y.Z>-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux aarch64 | `frank-v<X.Y.Z>-aarch64-unknown-linux-gnu.tar.gz` |
+| Windows x86_64 | `frank-v<X.Y.Z>-x86_64-pc-windows-msvc.zip` |
+| Windows aarch64 | `frank-v<X.Y.Z>-aarch64-pc-windows-msvc.zip` |
 
-例 (macOS Apple Silicon):
+例 (macOS Apple Silicon, v0.5.1):
 ```bash
-curl -fsSL https://github.com/hutiefang76/skills-frank/releases/latest/download/frank-v0.4.0-aarch64-apple-darwin.tar.gz | tar xz
+curl -fsSL https://github.com/hutiefang76/skills-frank/releases/latest/download/frank-v0.5.1-aarch64-apple-darwin.tar.gz | tar xz
 sudo install -m 755 frank /usr/local/bin/    # 或: mv frank ~/.local/bin/
 frank doctor                                 # 验证安装
 ```
@@ -98,7 +109,7 @@ cargo install --path crates/frank-cli --locked    # 全局装
 
 > ⚠️ `cargo install frank` **永久不可用** — crates.io 上 `frank` 这个名字早在 2019 年被别人占了 (跟本项目无关)。发布到 crates.io 需要改名 (如 `frank-cli`),P1 决定。
 >
-> ⚠️ `brew install frank` / `npm i -g @hutiefang/frank-cli` 也不可用 — homebrew-tap / npm wrapper 留到 P1。
+> ⚠️ `npm i -g @hutiefang/frank-cli` 也不可用 — npm wrapper 留到 P1。
 
 ### 验证安装
 
