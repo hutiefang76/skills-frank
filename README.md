@@ -136,35 +136,100 @@ frank logout                      # 删本机 token
 > 完全无关**。`frank memory list/search` 只读 qdrant 不调 LLM,**零计费**;
 > 调 LLM 的只有 `frank ai ask` 和 `frank memory add` (后者要 LLM 抽 fact)。
 
-### daemon 自启 + Web UI (v0.5 新增, macOS launchd)
+### daemon (可选) — 仅 Web UI / 多 agent 共享上下文用户需要
 
-`frank` 设计上是后台 daemon: 注册 launchd 一次就**永远在跑** (登录自启, 挂了自动重启),
-日常你只敲 `frank` (无参数) 自动开浏览器到 Web UI。**不用再手动 `orchestrator serve` 阻塞终端**。
+> ⚠️ **frank 90% 功能在 CLI** — `install/uninstall/scan/cleanup/login/orchestrator demo/ai ask` 都不需要 daemon。
+> 装完 frank 不主动起 daemon 也能用全部 CLI 命令。**不用 Web UI 就别让它跑**:
+> ```bash
+> brew services stop frank   # 关掉 daemon, CLI 不受影响
+> ```
 
+daemon 的实际价值:
+- ✅ **Web UI** (`http://127.0.0.1:7780`): 给"想要图形界面"的人。下拉选 cli + 输 prompt + 流式回显
+- ✅ **共享上下文** (v0.8+): claude 写代码 → codex review 时自动拿到 claude 的上下文 (跨 cli 共享 memory)
+- ⏳ ~~多设备分布式 memory~~ / ~~多 agent 自动协作~~: 设计中,未实现
+
+**brew 装的用法** (推荐):
+```bash
+brew install hutiefang76/frank/frank      # 装 binary, 不自动起 daemon
+brew services start frank                  # 想要 Web UI 才主动起 (一次, 重启自动)
+open http://127.0.0.1:7780                 # 看 Web UI
+brew services stop frank                   # 关掉
+brew services list | grep frank           # 看状态
+```
+
+**源码 / 一键脚本装的用法** (无 brew 时):
 ```bash
 # 装一次 (写 ~/Library/LaunchAgents/com.frank.orchestrator.plist + 立刻起)
 frank daemon install              # 默认 127.0.0.1:7780
 frank daemon install --port 7799  # 自定义端口
 
-# 日常用
-frank                             # 无参数: 自动开浏览器到 daemon URL
+# 日常
+frank                             # 无参: 自动开浏览器到 daemon URL
 frank daemon status               # 看 PID + 端口
-frank daemon stop / start         # KeepAlive=true, stop 后会自动拉起
+frank daemon stop / start
 frank daemon uninstall            # 移除 launchd 注册 + 删 plist
 
 # 日志
 tail -f ~/.frank/logs/orchestrator.out.log
 ```
 
-> **Linux / Windows**: v0.5 仅 macOS launchd 真接, systemd user unit + Windows 服务留 v0.6。
-> 临时跑可继续用 `frank orchestrator serve --bind 127.0.0.1:7780` (阻塞终端)。
+> brew 装的环境下 `frank daemon install/start/stop` 写操作被禁用 (v0.7+) — 统一走 `brew services`。
+> **Linux / Windows**: v0.5 仅 macOS launchd 真接, systemd user unit + Windows 服务留后续。
+> 临时跑可用 `frank orchestrator serve --bind 127.0.0.1:7780` (阻塞终端)。
 
 ### 安装 skill
 
 ```bash
 frank install doris-ops               # 公开 skill (manifest/public.yaml)
 frank install kdwl:vehicle-events     # 公司 skill (~/.frank/manifests/, SSH + VPN)
+frank install --url https://github.com/foo/skills-bar.git   # 任意 git URL (v0.7+)
 ```
+
+### 缓存机制 (`~/.frank/cache/`)
+
+frank `install` 不复制 skill 文件,而是 **git clone 到本机 cache** + **symlink 到三平台 skills 目录**。这样:
+
+- 升级是增量 `git fetch + checkout`,**不重新 clone** — 几 KB 数据,毫秒级
+- 链接不断 — 文件原地变,symlink 自动指向新版本
+- 跨设备 cache key 一致(`sha256(url)[..8]` 16 hex),将来分布式同步只算一份
+
+```text
+~/.frank/cache/
+├── efb0d2a9d0eab3e7/   ← sha256(https://github.com/foo/bar.git)[..8]
+│   ├── .git/
+│   └── <repo files...>
+└── 230b59f412650c3c/
+    └── ...
+```
+
+| 命令 | 干嘛 |
+|------|------|
+| 自然占用 | 一个 skill 约 50-200 KB,十几个全装齐 ~1-2 MB,**可忽略** |
+| `frank uninstall <name>` | **不删** cache(留着重装时复用) |
+| `frank uninstall` (无参) | 默认**删** cache(既然全部卸了,留着没意义) |
+| `frank uninstall --keep-cache` | 保留 cache(准备一会重装,或者升级中途回滚) |
+| `rm -rf ~/.frank/cache/` | 暴力清,下次 `install` 自动重 clone |
+
+### 卸载 skill
+
+```bash
+frank uninstall nacos-ops             # 单卸一个,任何 visibility 都行
+frank uninstall                       # 清 frank 自家装的全部 (frank-official + frank-recommended) + cache
+frank cleanup                         # 等价 + 打印 brew 卸载引导
+```
+
+`frank uninstall` 5 种用法对照:
+
+| 命令 | 干嘛 | 第三方 (`--url` 装的) | cache |
+|------|------|------------------|-------|
+| `frank uninstall` | 清 frank 自家装的全部 | **保留** | **删** |
+| `frank uninstall <name>` | 单卸,任何 visibility | (单卸不影响) | (单卸保留) |
+| `frank cleanup` | 同 `frank uninstall` 无参 + 引导 brew 卸载 | **保留** | **删** |
+| `frank uninstall --including-3rd-party` | 真全清 | **也清** | **删** |
+| `frank uninstall --keep-cache` | 卸 skill 留 cache | 保留 | **保留** |
+
+**设计原则**: frank 只对自己装的负责。用户 `frank install --url ...` 装的第三方 skill,frank 觉得"是你自己挑的",默认不动 — 你装的你自己卸,要求自己清就 `--including-3rd-party`。
 
 ### orchestrator 子命令 (P6 M1 真接本机 CLI subprocess)
 

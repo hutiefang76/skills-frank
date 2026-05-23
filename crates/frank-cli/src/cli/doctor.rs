@@ -80,6 +80,7 @@ pub fn run(args: Args) -> Result<()> {
     checks.extend(check_frank_home());
     checks.extend(check_platform_dirs());
     checks.extend(check_state_drift());
+    checks.extend(check_local_daemon());
     if !args.offline {
         checks.extend(check_sync_agent());
     }
@@ -293,6 +294,29 @@ fn check_state_drift() -> Vec<Check> {
             let _ = write!(detail, "orphan in state: {}", state_orphans.join(", "));
         }
         vec![Check::warn("state drift", detail)]
+    }
+}
+
+/// 本机 daemon (orchestrator serve) 状态. 开/不开都不算 fail — daemon 是可选的.
+/// 仅给用户一个 "Web UI 可用 / 不可用" 的可见提示.
+fn check_local_daemon() -> Vec<Check> {
+    let url = "http://127.0.0.1:7780/";
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(500))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return vec![Check::ok("daemon", "(skip: http client init failed)")],
+    };
+    match client.get(url).send() {
+        Ok(_) => vec![Check::ok(
+            "daemon",
+            "running on 127.0.0.1:7780 (Web UI 可用)",
+        )],
+        Err(_) => vec![Check::ok(
+            "daemon",
+            "off (CLI 全部命令可用; 想要 Web UI 跑 `brew services start frank`)",
+        )],
     }
 }
 
