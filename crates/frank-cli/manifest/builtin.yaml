@@ -150,19 +150,19 @@ skills:
   # ═══════════════════════════════════════════════════════════════
 
   - name: nacos-ops
-    description: Nacos 配置中心查询/修改 (Python skill, SKILL.md 在 .claude/skills/nacos-config/, setup 见 repo README)
+    description: 'Nacos 配置中心运维 (fetch/list/push/diff/cross-diff) — Python, demo 走 frank deploy/test-stack/'
     source:
       type: git
       url: https://github.com/hutiefang76/skills-nacos-ops.git
-      ref: master      # 默认分支 master 不是 main (实测)
-      subpath: .claude/skills/nacos-config
+      ref: master      # 默认分支 master, 不是 main
     visibility: frank-official
 
   - name: streampark-ops
-    description: StreamPark Flink 作业管理 (提交/启停/查日志) — 依赖见 skill 内 SKILL.md
+    description: 'Apache StreamPark Flink 作业平台运维 (list/show/deploy) — Python, demo 走 frank deploy/test-stack/'
     source:
       type: git
       url: https://github.com/hutiefang76/skills-streampark-ops.git
+      ref: main
     visibility: frank-official
 
   # ── 以下 3 个 skill 仓库还没发布 (404), 留占位等你 push 仓库后启用 ──

@@ -1,0 +1,115 @@
+# frank test-stack — 本机起 frank-official skill 的依赖中间件, 用于 SKILL.md 真测试
+#
+# 默认 (`docker compose up -d`) 只起 nacos, 占用 ~256MB:
+#   - nacos:     http://localhost:8848/nacos  (admin nacos/nacos)
+#
+# 显式起 streampark profile (`docker compose --profile streampark up -d`), 额外 ~700MB:
+#   - mysql:     localhost:3306  (streampark/streampark, 仅 streampark 内部用)
+#   - streampark http://localhost:10000  (admin/streampark)
+#
+# Demo 流程:
+#   docker compose -f deploy/test-stack/docker-compose.yml up -d
+#   frank install nacos-ops
+#   cd ~/.claude/skills/nacos-ops
+#   bash setup.sh
+#   cp config.ini.example config.ini   # 默认就是 localhost:8848 nacos/nacos, 直接能跑
+#   .venv/bin/python nacos_config.py list --env local
+#
+# 清理:
+#   docker compose -f deploy/test-stack/docker-compose.yml down -v
+
+networks:
+  frank-test:
+    driver: bridge
+
+volumes:
+  nacos-data:
+    driver: local
+  nacos-logs:
+    driver: local
+  mysql-data:
+    driver: local
+
+services:
+  # ----------------------------------------------------------------------------
+  # Nacos 2.x — 配置中心 (单容器 standalone 模式, 不需要外部 mysql)
+  # ----------------------------------------------------------------------------
+  nacos:
+    image: nacos/nacos-server:v2.3.2-slim
+    container_name: frank-test-nacos
+    restart: unless-stopped
+    ports:
+      - "8848:8848"   # HTTP (用户访问 + nacos_config.py 调用)
+      - "9848:9848"   # gRPC (Nacos 2.x 客户端必需)
+    environment:
+      MODE: standalone
+      # Demo 关 auth (本机用, 谁连谁能改). 真生产请改 true + 配 token/identity
+      NACOS_AUTH_ENABLE: "false"
+      JVM_XMS: "256m"
+      JVM_XMX: "256m"
+    volumes:
+      - nacos-data:/home/nacos/data
+      - nacos-logs:/home/nacos/logs
+    networks: [frank-test]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8848/nacos/v1/console/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # ----------------------------------------------------------------------------
+  # MySQL — StreamPark 元数据存储 (仅 streampark profile 起)
+  # ----------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: frank-test-mysql
+    profiles: ["streampark"]
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: streampark
+      MYSQL_DATABASE: streampark
+      MYSQL_USER: streampark
+      MYSQL_PASSWORD: streampark
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks: [frank-test]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pstreampark"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # ----------------------------------------------------------------------------
+  # StreamPark — Flink 作业平台 (仅 streampark profile 起)
+  # ----------------------------------------------------------------------------
+  streampark:
+    image: apache/streampark:2.1.4
+    container_name: frank-test-streampark
+    profiles: ["streampark"]
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "10000:10000"
+    environment:
+      SPRING_PROFILES_ACTIVE: mysql
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/streampark?useUnicode=true&characterEncoding=UTF-8&useSSL=false
+      SPRING_DATASOURCE_USERNAME: streampark
+      SPRING_DATASOURCE_PASSWORD: streampark
+    networks: [frank-test]
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:10000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
