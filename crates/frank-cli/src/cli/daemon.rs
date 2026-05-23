@@ -60,6 +60,31 @@ pub struct InstallArgs {
 
 /// 执行 daemon 命令。
 pub fn run(args: Args) -> Result<()> {
+    // v0.7: 检测到 binary 是 Homebrew 装的, 写操作 (install/start/stop/restart/uninstall)
+    // 强制 fail — 防用户像 v0.6.2 用户原话那样不小心注册第二个 launchd plist 抢端口.
+    // status 是 read-only, 任意环境都允许.
+    if matches!(args.command, DaemonCommand::Status) {
+        return status();
+    }
+    if is_brew_installed() {
+        bail!(
+            "frank 是 Homebrew 装的, `frank daemon` 写操作禁用 — 走 brew services 统一管理:\n\
+             \n\
+             启停服务:\n\
+             \x20 brew services start frank          # 启 (注册 launchd 自启)\n\
+             \x20 brew services restart frank        # 重启\n\
+             \x20 brew services stop frank           # 停\n\
+             \x20 brew services list                 # 状态\n\
+             \n\
+             看日志:\n\
+             \x20 tail -f $(brew --prefix)/var/log/frank/orchestrator.log\n\
+             \n\
+             卸载 frank:\n\
+             \x20 brew uninstall frank               # 自动 stop service + 删 binary\n\
+             \n\
+             `frank daemon status` 仍然可用 (read-only 查看跑了没)."
+        );
+    }
     match args.command {
         DaemonCommand::Install(a) => install(a.port),
         DaemonCommand::Uninstall => uninstall(),
@@ -71,6 +96,17 @@ pub fn run(args: Args) -> Result<()> {
         }
         DaemonCommand::Status => status(),
     }
+}
+
+/// 检测当前 binary 是不是 Homebrew Cellar 装的.
+fn is_brew_installed() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.canonicalize().ok())
+        .is_some_and(|p| {
+            let s = p.to_string_lossy().to_string();
+            s.contains("/Cellar/frank/") || s.contains("/homebrew/")
+        })
 }
 
 #[cfg(target_os = "macos")]
@@ -94,23 +130,6 @@ fn frank_binary_path() -> Result<PathBuf> {
 fn install(port: u16) -> Result<()> {
     let plist = plist_path()?;
     let bin = frank_binary_path()?;
-
-    // 如果用户走 Homebrew 装的, 优先推荐 brew services (它会管 launchd plist + brew uninstall 时
-    // 自动 stop). 这里不强制阻止 — 自部署 / Linux / Windows 用户必须靠 daemon install.
-    if bin.to_string_lossy().contains("/Cellar/frank/") || bin.to_string_lossy().contains("/opt/homebrew/")
-    {
-        crate::log::ui::warn(
-            "检测到 frank 是 Homebrew 装的 — 推荐用 `brew services start frank` 启动",
-        );
-        crate::log::ui::info("Homebrew 模式: 启停走 brew, `brew uninstall frank` 自动清服务");
-        crate::log::ui::info("  brew services start frank      # 启 (自动注册 launchd)");
-        crate::log::ui::info("  brew services list             # 状态");
-        crate::log::ui::info("  brew services stop frank       # 停");
-        crate::log::ui::info("");
-        crate::log::ui::info("继续 `frank daemon install` 也能用 — 但会注册第二个 launchd 项, 跟");
-        crate::log::ui::info("brew services 抢端口. 如果你坚持自管, 先 `brew services stop frank`.");
-        crate::log::ui::info("");
-    }
     let log_dir = dirs::home_dir()
         .context("home")?
         .join(".frank")

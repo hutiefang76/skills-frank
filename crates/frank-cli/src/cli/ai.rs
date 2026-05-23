@@ -67,6 +67,10 @@ pub struct AskArgs {
     #[arg(long)]
     pub source_tag: Option<String>,
 
+    /// 可选 model (例 `haiku`/`opus` for claude, `gpt-5.4-mini` for codex). 空 = CLI 默认.
+    #[arg(long)]
+    pub model: Option<String>,
+
     /// 投递的 prompt。可以直接传, 或用 `--` 后跟一段长文本。
     pub prompt: Vec<String>,
 
@@ -114,7 +118,7 @@ async fn run_ask(args: AskArgs) -> Result<()> {
     }
     let prompt = args.prompt.join(" ");
     let provider = parse_provider(&args.to)?;
-    let (bin, cli_args) = invocation(provider);
+    let (bin, cli_args) = invocation(provider, args.model.as_deref());
 
     if which::which(bin).is_err() {
         anyhow::bail!("`{bin}` CLI 没装 / 不在 PATH; 装好再试");
@@ -348,21 +352,30 @@ fn parse_provider(s: &str) -> Result<CliProvider> {
     }
 }
 
-/// 每家 CLI 的"非交互一问一答"调用方式。
+/// 每家 CLI 的"非交互一问一答"调用方式. 可选 model 通过 --model 注入.
 ///
-/// 注: 这里**只用** 进入非交互模式必需的最小 flag, 不传任何 system prompt / tools /
-/// model override — 用户在 CLI 配置里选好的模型 / 模式都保持原样.
-fn invocation(p: CliProvider) -> (&'static str, Vec<&'static str>) {
-    match p {
-        // claude --print 走非交互, 从 stdin 读 prompt (或 --print 后跟 arg, 我们走 stdin)
-        CliProvider::Claude => ("claude", vec!["--print"]),
-        // codex exec - 从 stdin 读
-        CliProvider::Codex => ("codex", vec!["exec", "--skip-git-repo-check", "-"]),
-        // opencode run - 从 stdin 读 (opencode 0.x 文档)
-        CliProvider::Opencode => ("opencode", vec!["run", "-"]),
-        // gemini --prompt -
-        CliProvider::Gemini => ("gemini", vec!["--prompt", "-"]),
+/// 注: 这里**只用** 进入非交互模式必需的最小 flag. 用户传 --model 时按各家官方语法注入.
+fn invocation(p: CliProvider, model: Option<&str>) -> (&'static str, Vec<String>) {
+    // 返回 Vec<String> (不再 &'static) 因为 model 是运行时值.
+    let mut args: Vec<String> = match p {
+        CliProvider::Claude => vec!["--print".into()],
+        CliProvider::Codex => vec!["exec".into(), "--skip-git-repo-check".into(), "-".into()],
+        CliProvider::Opencode => vec!["run".into(), "-".into()],
+        CliProvider::Gemini => vec!["--prompt".into(), "-".into()],
+    };
+    if let Some(m) = model {
+        // 各家都用 `--model <name>`. claude/codex 是 long flag, opencode 也是, gemini 是 -m/--model
+        // 插在已有 args 之前 (例 claude --model haiku --print)
+        args.insert(0, m.into());
+        args.insert(0, "--model".into());
     }
+    let bin = match p {
+        CliProvider::Claude => "claude",
+        CliProvider::Codex => "codex",
+        CliProvider::Opencode => "opencode",
+        CliProvider::Gemini => "gemini",
+    };
+    (bin, args)
 }
 
 /// 跟 LocalCliWorker 同款: 清空字符串 API key env, 避免 401 陷阱。
@@ -400,9 +413,15 @@ mod tests {
 
     #[test]
     fn invocation_uses_minimal_flags() {
-        let (bin, args) = invocation(CliProvider::Claude);
+        let (bin, args) = invocation(CliProvider::Claude, None);
         assert_eq!(bin, "claude");
-        // 只 --print, 不带 system prompt / tools (用户要求 "用原始参数")
         assert_eq!(args, vec!["--print"]);
+    }
+
+    #[test]
+    fn invocation_injects_model_when_given() {
+        let (bin, args) = invocation(CliProvider::Claude, Some("haiku"));
+        assert_eq!(bin, "claude");
+        assert_eq!(args, vec!["--model", "haiku", "--print"]);
     }
 }

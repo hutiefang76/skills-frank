@@ -26,6 +26,7 @@ pub mod import;
 pub mod install;
 pub mod list;
 pub mod login;
+pub mod market;
 pub mod memory;
 pub mod orchestrator;
 pub mod orchestrator_server;
@@ -109,6 +110,9 @@ enum Commands {
     /// 配置管理 (`frank config show / detect-proxy / set-proxy / unset-proxy`)。
     Config(config::Args),
 
+    /// 公开市场源 sync (`frank market sync / list` — 拉 modelcontextprotocol/servers + anthropics/skills)。
+    Market(market::Args),
+
     /// 移除已配 token (~/.frank/.token)。
     Logout,
 
@@ -150,6 +154,7 @@ pub fn run() -> Result<()> {
         Commands::Daemon(args) => daemon::run(args),
         Commands::Login(args) => login::run(args),
         Commands::Config(args) => config::run(args),
+        Commands::Market(args) => market::run(args),
         Commands::Logout => login::run(login::Args {
             command: Some(login::LoginCommand::Logout),
             token: None,

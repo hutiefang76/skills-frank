@@ -28,15 +28,6 @@ skills:
   #
   # 单 repo skills-frank-bridge 含全 7 个 sub-skill, 用 git+subpath 引用避免发 7 个 repo.
 
-  - name: frank-bridge
-    description: AI 之间一问一答桥 (`/frank:<provider> <prompt>` 触发, 转发给目标 CLI)
-    source:
-      type: git
-      url: https://github.com/hutiefang76/skills-frank-bridge.git
-      subpath: frank-bridge
-    visibility: frank-recommended
-    target_platforms: [claude, codex]
-
   - name: frank-ask-gpt
     description: 转发给 codex CLI (gpt-5.5 Plus) — `/frank:ask:gpt <prompt>` 或 "问 gpt"
     source:
@@ -159,10 +150,12 @@ skills:
   # ═══════════════════════════════════════════════════════════════
 
   - name: nacos-ops
-    description: Nacos 配置中心查询/修改 (用户自己机器跑 — 依赖 mysql-connector-python, setup 见 skill 内 install.sh)
+    description: Nacos 配置中心查询/修改 (Python skill, SKILL.md 在 .claude/skills/nacos-config/, setup 见 repo README)
     source:
       type: git
       url: https://github.com/hutiefang76/skills-nacos-ops.git
+      ref: master      # 默认分支 master 不是 main (实测)
+      subpath: .claude/skills/nacos-config
     visibility: frank-official
 
   - name: streampark-ops

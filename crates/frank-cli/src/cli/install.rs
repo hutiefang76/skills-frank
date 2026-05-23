@@ -17,7 +17,11 @@ use clap::Parser;
 
 use crate::adapter;
 use crate::installer::install as installer;
-use crate::manifest::{parser as mparser, resolver::Registry};
+use crate::manifest::{
+    parser as mparser,
+    resolver::Registry,
+    schema::{Skill, Source, Visibility},
+};
 use crate::scanner;
 use crate::state::{SkillState, State};
 
@@ -47,6 +51,13 @@ pub struct Args {
     /// 已安装时拉取新 commit 但保留原始 `installed_at`。
     #[arg(long)]
     pub upgrade: bool,
+
+    /// v0.7: 任意 git URL 装 (不通过 manifest). 例:
+    /// `frank install --url https://github.com/foo/bar.git`
+    /// 自动用 repo 名 (bar) 作 skill name, visibility=community.
+    /// 含 subpath 用 `#subpath` 后缀: `--url https://.../repo.git#path/to/skill`.
+    #[arg(long, value_name = "GIT_URL")]
+    pub url: Option<String>,
 }
 
 /// 执行 install 命令。
@@ -61,21 +72,39 @@ pub fn run(args: Args) -> Result<()> {
         crate::log::ui::warn("`--skip-health-check` is a no-op (health-check not yet executed)");
     }
 
-    let name = args
-        .name
-        .ok_or_else(|| anyhow!("provide a skill name (e.g. `frank install doris-ops`)"))?;
+    // v0.7: --url 模式直接 synthesize Skill, 跳过 manifest 查找.
+    let (name, skill_owned, skill_ref): (String, Option<crate::manifest::schema::Skill>, _);
+    if let Some(url) = args.url.as_ref() {
+        let s = synthesize_skill_from_url(url, args.name.as_deref())?;
+        name = s.name.clone();
+        crate::log::ui::info(&format!(
+            "--url 模式: 装 `{}` 从 {} (visibility=community)",
+            s.name, url
+        ));
+        skill_owned = Some(s);
+        skill_ref = skill_owned.as_ref().unwrap();
+    } else {
+        name = args
+            .name
+            .clone()
+            .ok_or_else(|| anyhow!("提供 skill name (例 `frank install doris-ops`) 或 --url <git>"))?;
 
-    // 1. 加载 manifest
-    let manifests = mparser::discover()?;
-    if manifests.is_empty() {
-        bail!("no manifest found; expected manifest/public.yaml or ~/.frank/manifests/*.yaml");
+        // 1. 加载 manifest
+        let manifests = mparser::discover()?;
+        if manifests.is_empty() {
+            bail!("no manifest found; expected manifest/public.yaml or ~/.frank/manifests/*.yaml");
+        }
+        let registry = Registry::new(mparser::merge(manifests));
+
+        // 2. 找 skill
+        let found = registry
+            .find(&name)
+            .ok_or_else(|| anyhow!("skill `{name}` not found in any manifest. 想装非内置: `frank install --url <git-url>`"))?;
+        // registry 拥有 skill, 这里 clone 拿一份 owned 让分支统一
+        skill_owned = Some(found.clone());
+        skill_ref = skill_owned.as_ref().unwrap();
     }
-    let registry = Registry::new(mparser::merge(manifests));
-
-    // 2. 找 skill
-    let skill = registry
-        .find(&name)
-        .ok_or_else(|| anyhow!("skill `{name}` not found in any manifest"))?;
+    let skill = skill_ref;
 
     // 3. 容错: state 已存在 / 平台上已是 external 撞名 → 友好提示
     let mut state = State::load_default()?;
@@ -186,4 +215,58 @@ fn preflight_external_check(name: &str, force: bool) -> Result<()> {
         "`{name}` already exists in {} platform skills dir as an external entry; run `frank import {name}` to manage it (or pass `--force` to overwrite)",
         platforms.len()
     );
+}
+
+/// `frank install --url <git>` 时把 URL 解析成临时 Skill struct (不写 manifest).
+///
+/// - URL 例 `https://github.com/foo/bar.git` → name="bar", subpath=None
+/// - URL 例 `https://github.com/foo/bar.git#path/to/skill` → name="skill" (subpath 最后一段), subpath="path/to/skill"
+/// - 用户传 `name` 参数时覆盖自动推导的 name (`frank install --url ... my-name`)
+/// - visibility 默认 community (用户开源 — 不算 frank-official 也不算 user-private)
+fn synthesize_skill_from_url(url: &str, override_name: Option<&str>) -> Result<Skill> {
+    let (clean_url, subpath) = if let Some((u, p)) = url.split_once('#') {
+        (u.to_string(), Some(p.to_string()))
+    } else {
+        (url.to_string(), None)
+    };
+    // 推导 name: subpath 最后一段, 没就 url repo 名 (去掉 .git)
+    let auto_name = subpath
+        .as_deref()
+        .and_then(|p| p.rsplit('/').next())
+        .map(String::from)
+        .or_else(|| {
+            clean_url
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .map(|s| s.trim_end_matches(".git").to_string())
+        })
+        .ok_or_else(|| anyhow!("can't infer name from URL `{url}`"))?;
+    let name = override_name.map_or(auto_name, String::from);
+    if name.is_empty() {
+        bail!("skill name 推导为空, 传 `frank install --url <url> <name>` 显式指定");
+    }
+    Ok(Skill {
+        name: name.clone(),
+        description: format!("Ad-hoc install via --url {url}"),
+        source: Source::Git {
+            url: clean_url,
+            r#ref: "main".to_string(),
+            subpath,
+        },
+        visibility: Visibility::Community,
+        auth: None,
+        target_platforms: vec![
+            crate::manifest::schema::Platform::Claude,
+            crate::manifest::schema::Platform::Codex,
+        ],
+        profile: None,
+        device_allowlist: vec![],
+        require_network: crate::manifest::schema::NetworkReq::Internet,
+        dependencies: crate::manifest::schema::Dependencies::default(),
+        health_check: None,
+        slash_command: None,
+        mcp_server: None,
+        metadata: std::collections::HashMap::new(),
+    })
 }

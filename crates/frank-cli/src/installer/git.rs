@@ -95,17 +95,38 @@ pub fn fetch(url: &str, git_ref: &str) -> Result<FetchResult> {
     })
 }
 
-/// 构造一个启用 `auto()` 代理探测的 `FetchOptions`。
+/// 构造启用代理的 `FetchOptions`. 两层 fallback:
 ///
-/// `ProxyOptions::auto()` 让 libgit2 自动读 `HTTP_PROXY` / `HTTPS_PROXY` 等环境变量,
-/// 与系统 git / curl 行为一致。每个 fetch 调用都需要单独构造一个 (FetchOptions 内
-/// 持有的回调状态不可复用)。
+/// 1. `~/.frank/config.toml [proxy].http` (显式 URL, daemon 模式必走这条 —
+///    launchd 启动的 daemon 不继承 user shell 的 HTTP_PROXY env)
+/// 2. `ProxyOptions::auto()` 让 libgit2 自动读 HTTP_PROXY / HTTPS_PROXY env
+///    (user 终端直接跑 frank install 时还是这条)
+///
+/// 每个 fetch 调用都需要单独构造一个 (FetchOptions 持有的回调状态不可复用)。
 fn build_fetch_options<'cb>() -> FetchOptions<'cb> {
     let mut proxy = ProxyOptions::new();
-    proxy.auto();
+    if let Some(url) = read_config_proxy() {
+        proxy.url(&url);
+    } else {
+        proxy.auto();
+    }
     let mut fo = FetchOptions::new();
     fo.proxy_options(proxy);
     fo
+}
+
+/// 读 `~/.frank/config.toml [proxy].http`, 没配返回 None.
+///
+/// 跟 `frank config set-proxy` 写入的 schema 对齐 (http / https / all 三个字段同值).
+fn read_config_proxy() -> Option<String> {
+    let path = dirs::home_dir()?.join(".frank").join("config.toml");
+    let text = fs::read_to_string(&path).ok()?;
+    let v: toml::Value = text.parse().ok()?;
+    v.get("proxy")?
+        .get("http")?
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .map(String::from)
 }
 
 fn open_or_clone(dest: &Path, url: &str) -> Result<Repository> {
