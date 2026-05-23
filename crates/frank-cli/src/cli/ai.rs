@@ -250,9 +250,10 @@ async fn inject_context_if_requested(raw_prompt: &str, args: &AskArgs) -> String
             return raw_prompt.to_string();
         }
     };
+    use std::fmt::Write as _;
     let mut s = String::from("## Recent Context (from shared memory)\n");
     for (i, f) in facts.iter().enumerate() {
-        s.push_str(&format!("{}. {f}\n", i + 1));
+        let _ = writeln!(s, "{}. {f}", i + 1);
     }
     s.push_str("\n## Question\n");
     s.push_str(raw_prompt);

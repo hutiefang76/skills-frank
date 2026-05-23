@@ -4,6 +4,41 @@
 
 ---
 
+## 2026-05-23 · sync-agent docker buildx 在国内 qemu emulation 下网络不稳, 重建 frank-sync-agent:0.8.0 失败
+
+**问题**: tx 上跑的是 `frank-sync-agent:0.1.0` 老镜像 (mock 模式 zero-vector embed → search 永远 no match)。v0.8 改了 `state.rs` 默认走 `LocalEmbedder` (fastembed 384d, 零 token), 但要让 tx 用新行为必须重 build 镜像。
+
+本机 (mac arm64) docker buildx build linux/amd64 cross-platform 受两个问题影响:
+1. **qemu emulation 性能差**: cargo build sync-agent (含 fastembed → ort → onnxruntime) 在模拟下需要 15-30min, 内存峰值 ~3GB
+2. **网络极不稳**: 阿里云镜像 / rsproxy.cn 在 qemu 下连接 timeout / slow ("Operation too slow. Less than 10 bytes/sec"), 多次重试同样失败
+3. **builder stage 缺 C++ 工具链**: fastembed → ort 静态链 `libstdc++` 需要 `g++ + libstdc++-12-dev` (已修 Dockerfile)
+
+**实测 3 次 buildx 尝试**: 都失败 (链接 stdc++ → 网络 timeout → 网络 timeout)。
+
+**影响**:
+- v0.8 frank-cli 代码全部就位 (Phase A/B/B'/C-1/C-2/D 全 commit)
+- `frank memory add/list/get` 链路通, **但 `frank memory search` 在 tx mock 模式下永远 no match**
+- `frank ai ask --context-from default` 也因此召回不到上下文 (会 graceful 降级到不注入, 不影响 ask 本身)
+- **本机起 frank-sync-agent (cargo run -p frank-sync-agent) 是 work 的** (默认 LocalEmbedder), 但 frank-cli 默认指 `frank.hutiefang.com` 不是 localhost
+
+**临时绕过** (高级用户):
+```bash
+# 本机起 sync-agent + qdrant (用 deploy/test-stack/ 加一段 qdrant service 或直接 docker run qdrant):
+docker run -d --name local-qdrant -p 6334:6334 -p 6333:6333 qdrant/qdrant:v1.18.0
+FRANK_QDRANT_URL=http://localhost:6334 cargo run -p frank-sync-agent --release
+# 指向本机 sync-agent (新终端):
+FRANK_SYNC_AGENT_URL=http://localhost:3000 frank memory add-raw "..." --user me
+FRANK_SYNC_AGENT_URL=http://localhost:3000 frank memory search "..." --user me
+```
+
+**计划修复** (v0.8.1):
+- 方向 A: 在 tx (linux/amd64 native) 上 cargo build, 不走 qemu emulation, 替换容器内 binary (docker volume mount)
+- 方向 B: 用 GitHub Actions ubuntu-latest (amd64 native) 跑 docker build, push 到 ghcr.io, tx pull
+- 方向 C: 用 dockerproxy / 自建 cargo mirror 改善 qemu 网络性能
+- 推荐 B: CI 化, 后续每次 sync-agent 改动自动 build + push
+
+---
+
 ## 2026-05-23 · `frank install --url <git>` 硬编码 ref=main, 默认 master 仓库失败
 
 **问题**: `crates/frank-cli/src/cli/install.rs::synthesize_skill_from_url` 把 git ref 硬编码为 `"main"`。如果目标仓库默认分支是 `master` (或其他), libgit2 fetch `main` 不存在的 ref 会失败:

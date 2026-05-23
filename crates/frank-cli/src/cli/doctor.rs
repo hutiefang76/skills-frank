@@ -301,12 +301,11 @@ fn check_state_drift() -> Vec<Check> {
 /// 仅给用户一个 "Web UI 可用 / 不可用" 的可见提示.
 fn check_local_daemon() -> Vec<Check> {
     let url = "http://127.0.0.1:7780/";
-    let client = match reqwest::blocking::Client::builder()
+    let Ok(client) = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_millis(500))
         .build()
-    {
-        Ok(c) => c,
-        Err(_) => return vec![Check::ok("daemon", "(skip: http client init failed)")],
+    else {
+        return vec![Check::ok("daemon", "(skip: http client init failed)")];
     };
     match client.get(url).send() {
         Ok(_) => vec![Check::ok(
