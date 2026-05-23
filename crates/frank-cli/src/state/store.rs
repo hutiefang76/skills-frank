@@ -66,6 +66,13 @@ pub struct SkillState {
 
     /// 当前是否启用 (true = adapter 链接存在; false = 仅保留 cache)。
     pub enabled: bool,
+
+    /// 装时记的 visibility (v0.7.3 起新增, 老 state 无字段时反序列化为 None).
+    /// 用于 `frank uninstall` 区分 frank 官方装的 vs 用户自己 --url 装的:
+    /// 无参数 uninstall 只清 frank-official + frank-recommended (frank 自己负责的),
+    /// community/team/private 不动 (用户自己装的, 用户自己卸).
+    #[serde(default)]
+    pub visibility: Option<crate::manifest::schema::Visibility>,
 }
 
 /// State 持久化句柄: 持有数据 + 文件路径, 提供 CRUD + save。
@@ -186,6 +193,7 @@ mod tests {
             platforms: vec![Platform::Claude],
             installed_at: Utc.with_ymd_and_hms(2026, 5, 21, 10, 0, 0).unwrap(),
             enabled: true,
+            visibility: None,
         }
     }
 

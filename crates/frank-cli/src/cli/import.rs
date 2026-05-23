@@ -81,6 +81,7 @@ pub fn run(args: Args) -> Result<()> {
         platforms,
         installed_at: Utc::now(),
         enabled: true,
+        visibility: None,
     });
     state.save()?;
 

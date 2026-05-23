@@ -1,40 +1,47 @@
 //! `frank uninstall` 子命令: 从三平台移除链接 + 删 state 记录 + (可选) 删 git cache。
 //!
-//! v0.7.1 起加 `--all` (清掉所有 managed) 和 `--purge-cache` (顺手删 ~/.frank/cache/<hash>).
-//! v0.7.2 起 `frank cleanup` = `uninstall --all --purge-cache` + 提示 brew uninstall 下一步.
+//! # v0.7.3 产品定义重新对齐 (用户原话: "frank uninstall 直接全部删除, 第三方 skills 不要管理")
+//!
+//! - `frank uninstall` — **默认** 清 frank 官方装的 (frank-official + frank-recommended)
+//!   + git cache. 用户 --url 装的 community/team/private **不动**.
+//! - `frank uninstall <name>` — 单卸某个 (任何 visibility 都行).
+//! - `frank uninstall --including-3rd-party` — 也清 community/team/private.
+//! - `frank uninstall --keep-cache` — 不删 ~/.frank/cache/<hash>/.
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
 
 use crate::installer::install as installer;
+use crate::manifest::schema::Visibility;
 use crate::state::{SkillState, State};
 
 /// `frank uninstall` 参数。
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// 要卸载的 skill 名称 (跟 --all 二选一).
+    /// 要卸载的 skill 名称 (不传 = 清 frank 官方的全部).
     pub name: Option<String>,
 
-    /// 清掉所有 frank-managed skill / MCP (state.json 全部 entry).
-    /// 用于 brew uninstall frank 前彻底清干净, 或换机器前清场.
+    /// 也清第三方 skill (community/team/private, 用户 frank install --url 装的).
+    /// 默认不动这些 — 用户自己装的, 用户自己负责卸载.
     #[arg(long)]
-    pub all: bool,
+    pub including_3rd_party: bool,
 
-    /// 顺手删 ~/.frank/cache/<hash>/ 下的 git clone 缓存.
-    /// 默认不删 (省得下次 install 同 skill 又 clone 一遍).
+    /// 不删 ~/.frank/cache/<hash>/ 下的 git clone 缓存.
+    /// 默认 **删** (跟 v0.7.1 反着, 用户原话 "直接全部删除").
     #[arg(long)]
-    pub purge_cache: bool,
+    pub keep_cache: bool,
 }
 
-/// `frank cleanup` — 一行清干净所有 frank 装的东西 (skill + MCP + cache), 引导 brew uninstall.
+/// `frank cleanup` — 一行清 frank 官方装的 (frank-official + frank-recommended) + 引导 brew uninstall.
 ///
-/// 等价 `frank uninstall --all --purge-cache` + 友好的下一步提示。
+/// 等价 `frank uninstall` 无参数 (v0.7.3 起默认清 frank 官方), 加 brew 引导提示.
+/// 第三方 skill (community/team/private) **不动** — 用户自己装的自己卸.
 pub fn run_cleanup() -> Result<()> {
-    crate::log::ui::section("frank cleanup — 一行清掉所有 frank 装的东西");
+    crate::log::ui::section("frank cleanup — 清 frank 官方装的全部 (第三方 skill 不动)");
     run(Args {
         name: None,
-        all: true,
-        purge_cache: true,
+        including_3rd_party: false,
+        keep_cache: false,
     })?;
     println!();
     crate::log::ui::info("剩下两步 (Homebrew 自己的事, frank 帮不上):");
@@ -42,7 +49,7 @@ pub fn run_cleanup() -> Result<()> {
     println!("  brew uninstall frank              # 删 binary (brew 自动 untap)");
     println!();
     crate::log::ui::info("可选: 清 ~/.frank/ (token / state / logs)");
-    println!("  rm -rf ~/.frank/                  # 保留: 保留账户配置以便重装继续用");
+    println!("  rm -rf ~/.frank/                  # 保留则重装直接接管");
     Ok(())
 }
 
@@ -52,25 +59,39 @@ pub fn run(args: Args) -> Result<()> {
 
     let mut state = State::load_default()?;
 
-    let targets: Vec<SkillState> = if args.all {
-        let v: Vec<_> = state.iter().cloned().collect();
-        if v.is_empty() {
-            crate::log::ui::info("没 managed skill 可卸 (state.json 空)");
-            return Ok(());
-        }
-        crate::log::ui::warn(&format!("--all: 卸 {} 个 skill / MCP", v.len()));
-        v
-    } else {
-        let name = args
-            .name
-            .as_ref()
-            .ok_or_else(|| anyhow!("提供 skill name 或 --all (卸全部)"))?;
+    let targets: Vec<SkillState> = if let Some(name) = args.name.as_ref() {
+        // 单卸: 用户显式指定, 任何 visibility 都行 (community 自己装的也能单卸)
         let entry = state
             .get(name)
-            .ok_or_else(|| anyhow!("`{name}` is not installed (no record in state.json)"))?;
+            .ok_or_else(|| anyhow::anyhow!("`{name}` is not installed (no record in state.json)"))?;
         vec![entry.clone()]
+    } else {
+        // 无参数 = 清 frank 官方装的全部 (frank-official + frank-recommended)
+        let entries: Vec<SkillState> = state
+            .iter()
+            .filter(|e| is_frank_owned(e, args.including_3rd_party))
+            .cloned()
+            .collect();
+        if entries.is_empty() {
+            crate::log::ui::info("没 frank 官方 skill 可卸 (state.json 没 frank-official / frank-recommended)");
+            return Ok(());
+        }
+        let total = state.iter().count();
+        let skipped = total - entries.len();
+        if args.including_3rd_party {
+            crate::log::ui::warn(&format!("--including-3rd-party: 卸 {} 个 (含第三方)", entries.len()));
+        } else if skipped > 0 {
+            crate::log::ui::warn(&format!(
+                "卸 {} 个 frank 官方 skill — {} 个第三方 (community/team/private) 保留 (加 --including-3rd-party 也清掉)",
+                entries.len(), skipped
+            ));
+        } else {
+            crate::log::ui::warn(&format!("卸 {} 个 frank 官方 skill", entries.len()));
+        }
+        entries
     };
 
+    let single_target = args.name.is_some();
     let mut ok = 0;
     let mut failed: Vec<(String, String)> = Vec::new();
     for entry in &targets {
@@ -79,7 +100,7 @@ pub fn run(args: Args) -> Result<()> {
             Ok(()) => {
                 state.remove(&entry.name);
                 ok += 1;
-                if !args.all {
+                if single_target {
                     crate::log::ui::success(&format!(
                         "`{}` uninstalled from {} platform{}",
                         entry.name,
@@ -93,20 +114,44 @@ pub fn run(args: Args) -> Result<()> {
     }
     state.save()?;
 
-    if args.purge_cache {
+    // 默认删 cache (v0.7.3 起改了), --keep-cache 才保留
+    if !args.keep_cache && !single_target {
         purge_cache_dir()?;
     }
 
-    if args.all {
-        crate::log::ui::success(&format!(
-            "卸了 {ok} 个 skill ({} 个失败)",
-            failed.len()
-        ));
+    if !single_target {
+        crate::log::ui::success(&format!("卸了 {ok} 个 skill ({} 个失败)", failed.len()));
     }
     for (name, err) in &failed {
         crate::log::ui::error(&format!("`{name}`: {err}"));
     }
     Ok(())
+}
+
+/// 判断 state entry 是不是 frank 自家装的 (frank-official 或 frank-recommended).
+///
+/// 老 state.json 没 visibility 字段 (反序列化为 None) → 通过 manifest 反查 fallback.
+/// 还查不到 (例 v0.7.0 之前装的, manifest 也没 — 比如老 frank-bridge) → 当成 frank 装的清掉.
+fn is_frank_owned(entry: &SkillState, including_3rd_party: bool) -> bool {
+    if including_3rd_party {
+        return true;
+    }
+    // 优先用 state 里记的 visibility
+    if let Some(vis) = entry.visibility {
+        return matches!(vis, Visibility::FrankOfficial | Visibility::FrankRecommended);
+    }
+    // fallback: manifest 找
+    let manifests = crate::manifest::parser::discover().unwrap_or_default();
+    let skills = crate::manifest::parser::merge(manifests);
+    if let Some(skill) = skills.iter().find(|s| s.name == entry.name) {
+        return matches!(
+            skill.visibility,
+            Visibility::FrankOfficial | Visibility::FrankRecommended
+        );
+    }
+    // 都查不到 — 老 state 又不在 manifest, 保守判定为"老的 frank 装的"清掉
+    // (用户的 --url 装的 v0.7+ 都有 state.visibility=Community, 不会走到这里)
+    true
 }
 
 /// 清 ~/.frank/cache/ 下全部子目录 (git clone 缓存). 不动 ~/.frank/.token / state.json / logs.

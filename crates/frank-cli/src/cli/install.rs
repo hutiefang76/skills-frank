@@ -126,6 +126,7 @@ pub fn run(args: Args) -> Result<()> {
         platforms: outcome.platforms.clone(),
         installed_at,
         enabled: true,
+        visibility: Some(skill.visibility),
     });
     state.save()?;
 

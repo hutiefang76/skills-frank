@@ -191,6 +191,7 @@ mod tests {
             platforms: vec![Platform::Claude],
             installed_at: Utc::now(),
             enabled,
+            visibility: None,
         });
         s
     }
