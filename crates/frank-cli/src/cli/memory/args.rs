@@ -62,6 +62,12 @@ pub struct AddArgs {
     /// 额外 JSON 元数据 (字符串形式, 必须解析为 object)。
     #[arg(long)]
     pub metadata: Option<String>,
+
+    /// v0.8: 客户端抽事实模式 — 调本机 cli 把 content 拆成多条独立 fact, 然后逐条 add_raw 入库.
+    /// 选项: `claude` / `codex` / `none` (默认 none = 服务端抽 / 直存原文)。
+    /// 借 mem0 抽 prompt 模板, 用户本机已登录 cli 复用 → 零额外 token 费.
+    #[arg(long, default_value = "none")]
+    pub extract_with: String,
 }
 
 /// `frank memory add-raw` 参数。

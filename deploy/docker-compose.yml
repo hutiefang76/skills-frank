@@ -34,7 +34,8 @@ volumes:
 
 services:
   qdrant:
-    image: qdrant/qdrant:v1.13.0
+    # v0.8: 升 v1.13.0 → v1.18.0 — qdrant-client crate v1.18 要求 server ≥ v1.17 (minor 兼容窗口 1)
+    image: qdrant/qdrant:v1.18.0
     container_name: frank-qdrant
     restart: unless-stopped
     expose:
@@ -61,7 +62,9 @@ services:
     #     -f deploy/sync-agent.Dockerfile \
     #     -t frank-sync-agent:0.1.0 \
     #     --output type=docker,dest=/tmp/frank-sync-agent.tar .
-    image: frank-sync-agent:0.1.0
+    # v0.8: bump 0.1.0 → 0.8.0, mock 模式默认关 (LocalEmbedder fastembed 384d + Mock 行拆 extractor).
+    # 详见 ADR-003: 默认零 token, 不需要 OPENAI/ANTHROPIC key 也能跑.
+    image: frank-sync-agent:0.8.0
     container_name: frank-sync-agent
     restart: unless-stopped
     expose:
@@ -69,21 +72,23 @@ services:
     environment:
       FRANK_BIND_ADDR: 0.0.0.0:3000
       FRANK_QDRANT_URL: http://qdrant:6334
-      # 注: collection 名跟 FRANK_MEMORY_MOCK 联动 — mock 用 16 维, prod 用 1536 维, 不能共用!
-      # mock=1 时强制 _mock 后缀, 防止切到真 key 后 prod 写入 16 维 collection 失败 (P2-4)
-      FRANK_COLLECTION: ${FRANK_COLLECTION:-frank_memories_mock_v1}
-      # mock 模式: 暂无 OpenAI / Anthropic key, 让服务能起来占位.
-      # 接入真 key 后:
-      #   1. FRANK_MEMORY_MOCK=0
-      #   2. FRANK_COLLECTION=frank_memories_v1 (不同 collection, 避免维度污染)
-      #   3. 通过 .env / secrets 注入 OPENAI_API_KEY + ANTHROPIC_API_KEY
-      FRANK_MEMORY_MOCK: "1"
+      # v0.8: collection 默认 frank_memories_v1 (384 维, LocalEmbedder).
+      # 老 mock 用 16 维 _mock_v1, 不能共用 — 切真模式时直接换 collection 名.
+      FRANK_COLLECTION: ${FRANK_COLLECTION:-frank_memories_v1}
+      # v0.8: mock 默认关. 切 mock 用 docker compose run -e FRANK_MEMORY_MOCK=1 ...
+      # 接入云 key (可选, 抽 fact 质量更好):
+      #   - OPENAI_API_KEY: 切 OpenAIEmbedder (1536 维, 需换 collection)
+      #   - ANTHROPIC_API_KEY: 切 ClaudeExtractor (服务端抽 fact, 现 frank-cli 走客户端抽)
+      FRANK_MEMORY_MOCK: ${FRANK_MEMORY_MOCK:-0}
+      # HuggingFace 国内镜像 (fastembed 首次下载 ~50MB BGE 模型); hf-mirror.com 是社区维护的 HF 全量镜像
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
       RUST_LOG: "info,frank_memory=debug,frank_sync_agent=debug"
     networks: [frank-net]
     depends_on:
       qdrant:
         condition: service_healthy
-    mem_limit: 128m
+    # v0.8: 拉高 mem_limit 128m → 512m. fastembed ONNX runtime + BGE 模型加载需 ~300MB
+    mem_limit: 512m
 
   caddy:
     image: caddy:2.10-alpine

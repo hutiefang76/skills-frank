@@ -32,11 +32,14 @@ RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
 # protobuf-compiler: qdrant-client 走 gRPC, build.rs 需要 protoc 生成 PB stub
 # pkg-config + libssl-dev: 保险起见装上 (reqwest 走 rustls 理论不需要, 但 transitive 偶尔会 link;
 #                          不装的话失败成本高、装上的话只在 builder stage 增加体积, runtime 不受影响)
+# g++ + libstdc++-12-dev: v0.8 加 fastembed → ort (ONNX runtime) 静态链 C++ stdlib (libstdc++) 需要
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         pkg-config \
         libssl-dev \
         protobuf-compiler \
+        g++ \
+        libstdc++-12-dev \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

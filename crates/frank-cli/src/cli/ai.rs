@@ -77,6 +77,16 @@ pub struct AskArgs {
     /// 超时秒数 (默认 300, codex high-reasoning 慢)。
     #[arg(long, default_value_t = 300)]
     pub timeout: u64,
+
+    /// v0.8: 共享上下文注入 — 调 cli 前从 frank-memory 搜 top-3 相关记忆注入 prompt 前缀.
+    /// scope 默认 `default`, 多设备/多 session 用不同 tag 隔离 (`--context-from project-x`).
+    /// **不指定 = 不注入**, 完全跟旧版兼容; 注入失败 (sync-agent 不可用) 也降级到不注入, 不阻塞 ask.
+    #[arg(long, value_name = "SESSION_TAG")]
+    pub context_from: Option<String>,
+
+    /// v0.8: 关掉自动存 (ask 完成后异步把 prompt+response 存 frank-memory). 默认存.
+    #[arg(long)]
+    pub no_save: bool,
 }
 
 /// `frank ai history` 参数。
@@ -116,7 +126,9 @@ async fn run_ask(args: AskArgs) -> Result<()> {
     if args.prompt.is_empty() {
         anyhow::bail!("missing prompt (用法: `frank ai ask --to codex \"你的问题\"`)");
     }
-    let prompt = args.prompt.join(" ");
+    let raw_prompt = args.prompt.join(" ");
+    // v0.8 共享上下文: --context-from <tag> 触发, 失败 graceful 降级到不注入
+    let prompt = inject_context_if_requested(&raw_prompt, &args).await;
     let provider = parse_provider(&args.to)?;
     let (bin, cli_args) = invocation(provider, args.model.as_deref());
 
@@ -159,12 +171,17 @@ async fn run_ask(args: AskArgs) -> Result<()> {
     {
         Ok(Ok(status)) if status.success() => {
             let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let response = buf.trim_end().to_string();
             let _ = append_history(&HistoryEntry::ok(
-                &args, &prompt, buf.trim_end(), latency_ms,
+                &args, &raw_prompt, &response, latency_ms,
             ));
+            // v0.8 自动存: 异步把 (raw_prompt, response) 存 frank-memory, 失败仅 warn
+            if !args.no_save {
+                save_to_memory_if_possible(&args, &raw_prompt, &response).await;
+            }
             // 把回答原样 print 到 stdout (调用方终端直接看到)
-            print!("{}", buf.trim_end());
-            if !buf.ends_with('\n') {
+            print!("{response}");
+            if !response.ends_with('\n') {
                 println!();
             }
             Ok(())
@@ -191,6 +208,98 @@ async fn run_ask(args: AskArgs) -> Result<()> {
             anyhow::bail!("`{bin}` timed out after {}s", args.timeout);
         }
     }
+}
+
+// ─── v0.8 共享上下文 (memory inject + auto-save) ───────────────────────────
+
+/// 调 sync-agent search → 拼成 "## Recent Context\n...\n\n## Question\n{prompt}" 前缀.
+///
+/// 失败 graceful: 无 token / sync-agent 不可用 / search 返回空 → 返回原 prompt 不变.
+/// 不打扰用户终端 — 只在 RUST_LOG=debug 时记录失败原因.
+async fn inject_context_if_requested(raw_prompt: &str, args: &AskArgs) -> String {
+    let Some(session) = args.context_from.as_deref() else {
+        return raw_prompt.to_string(); // 不指定 = 不注入
+    };
+    let result = tokio::task::spawn_blocking({
+        let session = session.to_string();
+        let prompt = raw_prompt.to_string();
+        move || -> anyhow::Result<Vec<String>> {
+            let client = crate::sync_client::SyncClient::from_env_or_config()?;
+            let scope = frank_memory::Scope {
+                user_id: None,
+                agent_id: None,
+                session_id: Some(session),
+            };
+            let matches = client.search(&prompt, &scope, Some(3), Some(0.3))?;
+            Ok(matches.into_iter().map(|m| m.record.content).collect())
+        }
+    })
+    .await;
+    let facts = match result {
+        Ok(Ok(facts)) if !facts.is_empty() => facts,
+        Ok(Ok(_)) => {
+            tracing::debug!("inject_context: no relevant memory");
+            return raw_prompt.to_string();
+        }
+        Ok(Err(e)) => {
+            tracing::debug!("inject_context: search failed: {e:#}");
+            return raw_prompt.to_string();
+        }
+        Err(e) => {
+            tracing::debug!("inject_context: spawn_blocking failed: {e}");
+            return raw_prompt.to_string();
+        }
+    };
+    let mut s = String::from("## Recent Context (from shared memory)\n");
+    for (i, f) in facts.iter().enumerate() {
+        s.push_str(&format!("{}. {f}\n", i + 1));
+    }
+    s.push_str("\n## Question\n");
+    s.push_str(raw_prompt);
+    s
+}
+
+/// ask 完成后异步存 (prompt, response) 到 frank-memory.
+///
+/// 不抽事实, 直接拼 "Q: ...\nA: ..." 作为 raw fact 入库 (用户原话: 简单可用先, mem0 风格抽事实留 v0.9).
+/// 失败 graceful (sync-agent 不可用就跳过), 不影响 ask 返回值.
+async fn save_to_memory_if_possible(args: &AskArgs, raw_prompt: &str, response: &str) {
+    let Some(session) = args.context_from.clone() else {
+        // --context-from 没指定时不存 (避免污染默认 scope)
+        return;
+    };
+    let fact = format!(
+        "Q ({} → {}): {}\nA: {}",
+        args.from.as_deref().unwrap_or("user"),
+        args.to,
+        raw_prompt.chars().take(500).collect::<String>(),
+        response.chars().take(1500).collect::<String>(),
+    );
+    let metadata = serde_json::json!({
+        "from": args.from.clone().unwrap_or_default(),
+        "to": args.to.clone(),
+        "source_cwd": args.source_cwd.clone().unwrap_or_default(),
+        "source_tag": args.source_tag.clone().unwrap_or_default(),
+    });
+    let _ = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let client = crate::sync_client::SyncClient::from_env_or_config()?;
+        let scope = frank_memory::Scope {
+            user_id: None,
+            agent_id: None,
+            session_id: Some(session),
+        };
+        client.add_raw(&fact, &scope, Some(&metadata))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| {
+        tracing::debug!("save_to_memory: spawn_blocking failed: {e}");
+    })
+    .and_then(|r| {
+        r.map_err(|e| {
+            tracing::debug!("save_to_memory: add_raw failed: {e:#}");
+        })
+    });
 }
 
 // ─── history 持久化 (v0.6 新, ~/.frank/ai_history.jsonl) ───────────────────

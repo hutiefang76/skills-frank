@@ -44,19 +44,109 @@ fn short_id(id: &MemoryId) -> String {
     s.chars().take(8).collect::<String>() + "…"
 }
 
-/// `frank memory add` 实现。
+/// `frank memory add` 实现。v0.8: `--extract-with <cli>` 走客户端抽事实流程.
 pub fn run_add(client: &SyncClient, args: AddArgs) -> Result<()> {
     let scope = scope_of(args.user, args.agent, args.session);
     if scope.is_empty() {
         crate::log::ui::warn("scope is empty; consider --user to avoid global writes");
     }
     let metadata = parse_metadata(args.metadata)?;
+
+    // v0.8: 客户端抽 fact 模式 (--extract-with claude/codex)
+    let extract = args.extract_with.trim().to_lowercase();
+    if extract != "none" && !extract.is_empty() {
+        let facts = extract_facts_via_cli(&extract, &args.content)?;
+        if facts.is_empty() {
+            crate::log::ui::warn("extract returned 0 facts; nothing stored");
+            return Ok(());
+        }
+        crate::log::ui::info(&format!("client-extracted {} fact(s) via `{extract}`", facts.len()));
+        let mut stored = 0usize;
+        for f in &facts {
+            match client.add_raw(f, &scope, metadata.as_ref()) {
+                Ok(id) => {
+                    println!("  {id}  {f}");
+                    stored += 1;
+                }
+                Err(e) => {
+                    crate::log::ui::error(&format!("add_raw `{f}` failed: {e:#}"));
+                }
+            }
+        }
+        crate::log::ui::success(&format!("stored {stored}/{} fact(s)", facts.len()));
+        return Ok(());
+    }
+
+    // 默认: 服务端抽 (v0.1 ~ v0.7 行为不变)
     let ids = client.add(&args.content, &scope, metadata.as_ref())?;
     crate::log::ui::success(&format!("stored {} fact(s)", ids.len()));
     for id in &ids {
         println!("  {id}");
     }
     Ok(())
+}
+
+/// v0.8: 本机 cli (claude/codex/gemini) subprocess 抽 fact.
+///
+/// prompt 模板借 mem0 (Apache 2.0): 强 JSON schema, 每条短句独立可 embed.
+/// 调 cli 用各家 `--print` / `exec` 非交互 flag (跟 `frank ai ask` 一致).
+fn extract_facts_via_cli(cli: &str, content: &str) -> Result<Vec<String>> {
+    use std::process::Command;
+    let (bin, cli_args): (&str, Vec<&str>) = match cli {
+        "claude" => ("claude", vec!["--print"]),
+        "codex" => ("codex", vec!["exec", "--skip-git-repo-check"]),
+        "gemini" => ("gemini", vec!["--prompt", "-"]),
+        other => anyhow::bail!("unknown extractor cli: `{other}` (支持: claude / codex / gemini / none)"),
+    };
+    if which::which(bin).is_err() {
+        anyhow::bail!("`{bin}` 不在 PATH; 装好或换 --extract-with <other>");
+    }
+    let prompt = format!(
+        "You extract factual statements from the user's text. Output ONLY a JSON array of \
+short declarative English sentences. Each sentence: subject + verb + object, present tense, \
+self-contained, captures ONE fact. NO commentary, NO nesting, NO trailing prose.\n\n\
+Example: [\"user prefers vim over emacs\", \"user's project uses Rust 1.75\"]\n\n\
+TEXT TO ANALYZE:\n{content}\n\nJSON OUTPUT:"
+    );
+
+    let mut child = Command::new(bin)
+        .args(&cli_args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .with_context(|| format!("spawn `{bin}`"))?;
+    use std::io::Write as _;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(prompt.as_bytes())
+            .with_context(|| format!("write prompt to `{bin}` stdin"))?;
+        drop(stdin);
+    }
+    let out = child.wait_with_output()
+        .with_context(|| format!("wait `{bin}`"))?;
+    if !out.status.success() {
+        anyhow::bail!("`{bin}` exit {} during fact extract", out.status.code().unwrap_or(-1));
+    }
+    let raw = String::from_utf8_lossy(&out.stdout).to_string();
+    parse_facts_json(&raw)
+}
+
+/// 从 cli 返回的 raw 字符串里抠出 JSON array. cli 可能加 markdown ``` 包围或前缀解释,
+/// 我们贪婪找 `[...]` 第一段并解析.
+fn parse_facts_json(raw: &str) -> Result<Vec<String>> {
+    // 1. 直接试 parse (cli 比较听话时)
+    if let Ok(v) = serde_json::from_str::<Vec<String>>(raw.trim()) {
+        return Ok(v);
+    }
+    // 2. 找第一个 `[` 到 last `]` 之间
+    let start = raw.find('[').ok_or_else(|| anyhow!("no `[` in cli output: {raw:?}"))?;
+    let end = raw.rfind(']').ok_or_else(|| anyhow!("no `]` in cli output"))?;
+    if end <= start {
+        anyhow::bail!("invalid `[..]` order in cli output: {raw:?}");
+    }
+    let slice = &raw[start..=end];
+    serde_json::from_str::<Vec<String>>(slice)
+        .with_context(|| format!("parse JSON array slice: {slice:?}"))
 }
 
 /// `frank memory add-raw` 实现。
