@@ -267,34 +267,78 @@ fn status() -> Result<()> {
     Ok(())
 }
 
-/// 给 `frank` (无 args) 调用: 检查 daemon 是否在跑, 在跑就打开浏览器, 否则提示装。
+/// 给 `frank` (无 args) 调用: 显示 banner / 状态 / URL, **不自动开浏览器**。
+///
+/// 之前直接 `open <url>` 太突兀, 用户原话: "敲 frank cli 直接跳到 web 界面? 输出介绍和帮助,
+/// 服务状态? 以及页面地址?". 现在改成 banner + 状态 + 引导, 用户自己决定要不要点 URL.
 pub fn open_browser_or_hint() -> Result<()> {
-    let out = Command::new("launchctl")
-        .args(["list", DAEMON_LABEL])
-        .output()
-        .ok();
-    let running = out.as_ref().is_some_and(|o| {
-        o.status.success()
-            && String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .any(|l| l.contains("\"PID\"") && !l.contains("= 0;"))
-    });
+    use owo_colors::{OwoColorize, Stream};
 
-    if running {
+    // 探测 daemon 状态
+    let (status_label, status_detail) = detect_daemon_status();
+
+    // Banner (owo_colors 链式 .x().y() 触发 borrow 问题, 只用单色 + bold)
+    println!();
+    let frank_title = "frank".if_supports_color(Stream::Stdout, |t| t.bright_cyan()).to_string();
+    let version_dim = format!(" v{}", env!("CARGO_PKG_VERSION"))
+        .if_supports_color(Stream::Stdout, |t| t.dimmed())
+        .to_string();
+    println!("  {frank_title}{version_dim}    — AI 工具链治理 (skill + MCP + 跨 AI ask)");
+    println!();
+    // 状态
+    println!("  服务状态  {status_label}  {status_detail}");
+    if status_label.contains("running") {
         let url = format!("http://127.0.0.1:{DEFAULT_PORT}");
-        crate::log::ui::info(&format!("打开浏览器 → {url}"));
-        // macOS open <url>
-        #[cfg(target_os = "macos")]
-        let _ = Command::new("open").arg(&url).status();
-        #[cfg(target_os = "linux")]
-        let _ = Command::new("xdg-open").arg(&url).status();
-        #[cfg(target_os = "windows")]
-        let _ = Command::new("cmd").args(["/C", "start", "", &url]).status();
-        Ok(())
-    } else {
-        crate::log::ui::warn("daemon 未跑");
-        crate::log::ui::info("装 daemon: `frank daemon install` (会自启 + 永远在后台)");
-        crate::log::ui::info("或临时跑: `frank orchestrator serve --bind 127.0.0.1:7780`");
-        Ok(())
+        let url_colored = url.if_supports_color(Stream::Stdout, |t| t.bright_blue()).to_string();
+        println!("  Web UI    {url_colored}");
     }
+    println!();
+    // 常用命令
+    println!("  {}", "常用命令".if_supports_color(Stream::Stdout, |t| t.bold()));
+    println!("    frank ai ask --to <claude|gpt|opencode|gemini> \"...\"     跨 AI 一问一答");
+    println!("    frank ai history                                          查 ask 历史");
+    println!("    frank list                                                列 manifest 里全部 skill");
+    println!("    frank install <name>                                      装一个 skill / MCP");
+    println!("    frank scan [--mcp]                                        扫本机三平台 skill / MCP");
+    println!("    frank login                                               配 sync-agent token");
+    println!("    frank config show / set-proxy / detect-proxy             看 / 配 proxy");
+    println!("    frank daemon install / status                             装后台服务");
+    println!();
+    if matches!(status_label.as_str(), "✓ running") {
+        println!("  {}", "在浏览器打开 Web UI:".dimmed());
+        println!(
+            "    {}",
+            format!("open http://127.0.0.1:{DEFAULT_PORT}").if_supports_color(Stream::Stdout, |t| t.dimmed())
+        );
+    } else {
+        println!("  {}", "服务没跑 — 启:".dimmed());
+        println!("    {}", "brew services start frank".dimmed());
+        println!("    {}", "  (或 frank daemon install — 非 brew 装的)".dimmed());
+    }
+    println!();
+    Ok(())
+}
+
+/// 探测 launchd 里 daemon 状态, 返回 (label, detail).
+fn detect_daemon_status() -> (String, String) {
+    // 优先看 homebrew.mxcl.frank (brew services), fallback com.frank.orchestrator (frank daemon install)
+    for label in ["homebrew.mxcl.frank", DAEMON_LABEL] {
+        let Ok(out) = Command::new("launchctl").args(["list", label]).output() else {
+            continue;
+        };
+        if !out.status.success() {
+            continue;
+        }
+        let s = String::from_utf8_lossy(&out.stdout);
+        let pid = s
+            .lines()
+            .find(|l| l.contains("\"PID\""))
+            .and_then(|l| l.split('=').nth(1).map(str::trim))
+            .and_then(|p| p.trim_end_matches(';').parse::<u32>().ok())
+            .filter(|p| *p != 0);
+        if let Some(pid) = pid {
+            return ("✓ running".to_string(), format!("(PID {pid}, 注册名 {label})"));
+        }
+    }
+    ("✗ not running".to_string(), "(brew services start frank 或 frank daemon install)".to_string())
 }

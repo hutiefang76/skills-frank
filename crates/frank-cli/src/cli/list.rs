@@ -68,10 +68,12 @@ fn source_type_label(source: &Source) -> &'static str {
 }
 
 fn visibility_label(v: crate::manifest::schema::Visibility) -> String {
-    use crate::manifest::schema::Visibility::{Community, Curated, Official, Private, Team};
+    use crate::manifest::schema::Visibility::{
+        Community, FrankOfficial, FrankRecommended, Private, Team,
+    };
     match v {
-        Official => "official".into(),
-        Curated => "curated".into(),
+        FrankOfficial => "frank-official".into(),
+        FrankRecommended => "frank-recommended".into(),
         Community => "community".into(),
         Team => "team".into(),
         Private => "private".into(),

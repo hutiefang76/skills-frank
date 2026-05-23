@@ -34,7 +34,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-bridge
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: frank-ask-gpt
@@ -43,7 +43,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-gpt
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: frank-ask-claude
@@ -52,7 +52,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-claude
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: frank-ask-opencode
@@ -61,7 +61,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-opencode
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: frank-ask-gemini
@@ -70,7 +70,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-gemini
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: frank-mem-list
@@ -79,7 +79,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-mem-list
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: frank-mem-search
@@ -88,25 +88,26 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-mem-search
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   # ───── upstream / 第三方 (anthropics / open-source) ─────
 
   - name: skill-creator
-    description: 创建/迭代新 skill 的元 skill (anthropics 官方)
+    description: 创建/迭代新 skill 的元 skill (anthropics 官方, 在 anthropics/skills 仓 subpath)
     source:
       type: git
-      url: https://github.com/anthropics/skill-creator.git
-    visibility: curated
+      url: https://github.com/anthropics/skills.git
+      subpath: skills/skill-creator
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: superpowers
-    description: 通用编程超能力 (TDD/debug/brainstorming, anthropics 官方)
+    description: 通用编程超能力 (TDD/debug/brainstorming, 社区作者 obra/superpowers — 非 anthropics)
     source:
       type: git
-      url: https://github.com/anthropics/claude-superpowers.git
-    visibility: curated
+      url: https://github.com/obra/superpowers.git
+    visibility: frank-recommended
     target_platforms: [claude]
 
   # ===== frank-recommended MCP (v0.4 新增, 巧妙集成: source.type=mcp 自动写 ~/.claude.json) =====
@@ -117,7 +118,7 @@ skills:
       type: mcp
       command: npx
       args: ["-y", "@modelcontextprotocol/server-time"]
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: mcp-sequential-thinking
@@ -126,7 +127,7 @@ skills:
       type: mcp
       command: npx
       args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: mcp-fetch
@@ -135,7 +136,7 @@ skills:
       type: mcp
       command: uvx
       args: ["mcp-server-fetch"]
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   - name: mcp-context7
@@ -144,7 +145,7 @@ skills:
       type: mcp
       command: npx
       args: ["-y", "@upstash/context7-mcp"]
-    visibility: curated
+    visibility: frank-recommended
     target_platforms: [claude, codex]
 
   # ═══════════════════════════════════════════════════════════════
@@ -162,14 +163,14 @@ skills:
     source:
       type: git
       url: https://github.com/hutiefang76/skills-nacos-ops.git
-    visibility: official
+    visibility: frank-official
 
   - name: streampark-ops
     description: StreamPark Flink 作业管理 (提交/启停/查日志) — 依赖见 skill 内 SKILL.md
     source:
       type: git
       url: https://github.com/hutiefang76/skills-streampark-ops.git
-    visibility: official
+    visibility: frank-official
 
   # ── 以下 3 个 skill 仓库还没发布 (404), 留占位等你 push 仓库后启用 ──
   # 启用方法: 把对应 git url 仓库真发到 GitHub, 然后取消下方注释
@@ -177,14 +178,14 @@ skills:
   # - name: doris-ops
   #   description: TCHouse-D (Doris) 运维 (查表/性能/扩容)
   #   source: { type: git, url: https://github.com/hutiefang76/skills-doris-ops.git }
-  #   visibility: official
+  #   visibility: frank-official
   #
   # - name: feishu-read
   #   description: 飞书文档/表格/Excel/PDF 提取
   #   source: { type: git, url: https://github.com/hutiefang76/skills-feishu-read.git }
-  #   visibility: official
+  #   visibility: frank-official
   #
   # - name: dolphinscheduler-ops
   #   description: DolphinScheduler 任务运维 (查询/重跑/暂停)
   #   source: { type: git, url: https://github.com/hutiefang76/skills-dolphinscheduler-ops.git }
-  #   visibility: official
+  #   visibility: frank-official

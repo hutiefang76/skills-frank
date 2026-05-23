@@ -126,35 +126,38 @@ pub enum Source {
     },
 }
 
-/// skill 可见性 / 权限分档 (v0.6 国际化命名)。
+/// skill 可见性 / 权限分档 (v0.6.2 直观命名)。
 ///
-/// # 两层 5 档 (v0.6 重命名, 老值通过 #[serde(alias)] 兼容)
+/// # 两层 5 档
 ///
 /// **Layer 1: frank 内置** (装 frank 默认带, 项目方维护)
-/// - `official` — frank 项目方自家维护的开源 skills (内置到 binary, 例 nacos-ops)
-/// - `curated` — frank 项目方精选的 upstream / 第三方 skills (一键装, 例 skill-creator)
+/// - `frank-official`    — frank 出品: 项目方自家维护的开源 skills (例 nacos-ops, streampark-ops)
+/// - `frank-recommended` — frank 推荐: 项目方精选的 upstream / 第三方 skills (例 skill-creator)
 ///
 /// **Layer 2: 用户自定义** (用户自己加在 `~/.frank/manifests/`, 跟项目方无关)
-/// - `community` — 用户自己开源的 skills (任意公开 git URL)
-/// - `team` — 用户**所在团队/公司**的 skills (跟 frank 项目方无关, 严禁泄露到本仓!)
-/// - `private` — 用户自己机密的 skills (仅本机 / 个人凭据)
+/// - `community` — 用户开源的 skills (任意公开 git URL)
+/// - `team`      — 用户所在团队 / 公司的 skills (严禁混入本仓!)
+/// - `private`   — 用户私有的 skills (仅本机 / 个人凭据)
 ///
-/// # 老 v0.1 / v0.2 / v0.5 enum 值兼容
+/// # 历史命名兼容 (#[serde(alias)] 全部支持)
 ///
-/// 通过 `#[serde(alias)]` 兼容老 manifest, 不破老用户 `~/.frank/manifests/`:
-/// - v0.5: `frank-own` → `official`, `frank-recommended` → `curated`
-/// - v0.5: `user-public` → `community`, `user-company` → `team`, `user-private` → `private`
-/// - v0.1: `own-public` / `public` 还映射到 `official` / `curated` (二级 alias)
+/// - v0.6.0 `official` / `curated` (太抽象, v0.6.2 废)
+/// - v0.5   `frank-own` / `user-public` / `user-company` / `user-private`
+/// - v0.1   `public` / `own-public` / `private`
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Visibility {
     /// frank 项目方自研开源 — 装 frank 默认带, 维护者是项目方 (例: nacos-ops, streampark-ops).
-    #[serde(alias = "frank-own", alias = "own-public")]
-    Official,
+    #[serde(
+        alias = "official",
+        alias = "frank-own",
+        alias = "own-public"
+    )]
+    FrankOfficial,
 
     /// frank 项目方精选的 upstream / 第三方 skill — 默认列在 builtin, 一键装 (例: skill-creator).
-    #[serde(alias = "frank-recommended", alias = "public")]
-    Curated,
+    #[serde(alias = "curated", alias = "public")]
+    FrankRecommended,
 
     /// 用户自己开源的 skills — 任意公开 git URL, 无凭据.
     #[serde(alias = "user-public")]
@@ -170,10 +173,10 @@ pub enum Visibility {
 }
 
 impl Visibility {
-    /// 是否属于 frank 内置 (项目方维护, 装 frank 默认有 — official + curated)。
+    /// 是否属于 frank 内置 (项目方维护, 装 frank 默认有 — frank-official + frank-recommended)。
     #[must_use]
     pub fn is_frank_builtin(self) -> bool {
-        matches!(self, Self::Official | Self::Curated)
+        matches!(self, Self::FrankOfficial | Self::FrankRecommended)
     }
 
     /// 是否属于用户自定义 (用户自己 manifest 加的)。
@@ -341,17 +344,21 @@ skills:
 ";
         let m: Manifest = serde_yml::from_str(yaml).expect("parse minimal manifest");
         assert_eq!(m.skills.len(), 1);
-        assert!(matches!(m.skills[0].visibility, Visibility::Official));
+        assert!(matches!(m.skills[0].visibility, Visibility::FrankOfficial));
         assert!(m.skills[0].visibility.is_frank_builtin());
     }
 
-    /// v0.1 老 manifest (`own-public` / `public` / `private`) 仍能 load — alias 兼容。
+    /// v0.1 / v0.5 / v0.6.0 老 manifest (`own-public` / `public` / `private` / `official` / `curated` / `frank-own`)
+    /// 仍能 load — alias 兼容。
     #[test]
     fn parses_v01_aliases() {
         for (alias, expect) in [
-            ("own-public", Visibility::Official),
-            ("public", Visibility::Curated),
+            ("own-public", Visibility::FrankOfficial),
+            ("public", Visibility::FrankRecommended),
             ("private", Visibility::Private),
+            ("official", Visibility::FrankOfficial),
+            ("curated", Visibility::FrankRecommended),
+            ("frank-own", Visibility::FrankOfficial),
         ] {
             let yaml = format!(
                 "schema_version: 1\nskills:\n  - name: x\n    source: {{ type: git, url: 'https://example/x.git' }}\n    visibility: {alias}\n"

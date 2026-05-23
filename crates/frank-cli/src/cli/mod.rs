@@ -16,6 +16,7 @@ use clap::{Parser, Subcommand};
 
 // 各子命令模块声明 (P0 day3-4: install / uninstall / enable / disable / list 已落地)
 pub mod ai;
+pub mod config;
 pub mod daemon;
 pub mod dedupe;
 pub mod disable;
@@ -105,6 +106,9 @@ enum Commands {
     /// 配置 sync-agent 鉴权 token (一键 `--from-host tx` 或 `--token <xxx>`)。
     Login(login::Args),
 
+    /// 配置管理 (`frank config show / detect-proxy / set-proxy / unset-proxy`)。
+    Config(config::Args),
+
     /// 移除已配 token (~/.frank/.token)。
     Logout,
 
@@ -145,6 +149,7 @@ pub fn run() -> Result<()> {
         Commands::Sync(args) => sync::run(args),
         Commands::Daemon(args) => daemon::run(args),
         Commands::Login(args) => login::run(args),
+        Commands::Config(args) => config::run(args),
         Commands::Logout => login::run(login::Args {
             command: Some(login::LoginCommand::Logout),
             token: None,
