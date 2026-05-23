@@ -122,9 +122,13 @@ impl Worker for LocalCliWorker {
         which::which(self.provider.bin()).is_ok()
     }
 
+    #[allow(clippy::too_many_lines)] // 分支 (prompt arg vs stdin) + IO + 日志 + timeout 都在 run 里, 拆函数会重复 borrow
     async fn run(&self, step: &Step, log_tx: mpsc::Sender<LogLine>) -> Result<StepOutput> {
         let bin = self.provider.bin();
         let args = self.provider.args();
+        // claude --print 实测: 新版要求 prompt 必须作为 argument (stdin pipe EOF 拿不到).
+        // 其他 CLI (codex/opencode/gemini) 用 `-` 占位符接 stdin, 仍走 pipe.
+        let prompt_via_arg = matches!(self.provider, CliProvider::Claude);
 
         let _ = log_tx
             .send(LogLine::info(format!(
@@ -137,8 +141,11 @@ impl Worker for LocalCliWorker {
             .await;
 
         let mut cmd = Command::new(bin);
-        cmd.args(&args)
-            .stdin(Stdio::piped())
+        cmd.args(&args);
+        if prompt_via_arg {
+            cmd.arg(&step.prompt);
+        }
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
@@ -151,14 +158,20 @@ impl Worker for LocalCliWorker {
             .spawn()
             .with_context(|| format!("spawn `{bin}` (是否安装 + PATH 里?)"))?;
 
-        // 把 prompt 塞 stdin (低 token 路径: prompt 已是 minimal, executor 不重传 history)
+        // 把 prompt 塞 stdin (claude 已通过 arg 拿到了, 这里跳过, 直接 close stdin 让 CLI 不卡等输入)
         if let Some(mut stdin) = child.stdin.take() {
+            if !prompt_via_arg {
+                stdin
+                    .write_all(step.prompt.as_bytes())
+                    .await
+                    .context("write prompt to subprocess stdin")?;
+            }
+            // shutdown() 显式刷缓冲 + close fd, 触发 EOF.
+            // drop 在 tokio runtime 下不保证立即 close, 必须 shutdown.
             stdin
-                .write_all(step.prompt.as_bytes())
+                .shutdown()
                 .await
-                .context("write prompt to subprocess stdin")?;
-            // 关闭 stdin → 触发 CLI EOF, 让它开始处理
-            drop(stdin);
+                .context("shutdown subprocess stdin")?;
         }
 
         let stdout = child.stdout.take().context("take subprocess stdout")?;
