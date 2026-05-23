@@ -6,7 +6,7 @@ use anyhow::Result;
 use clap::Parser;
 use tabled::{Table, Tabled};
 
-use crate::manifest::{parser, resolver::Registry, schema::Skill};
+use crate::manifest::{parser, resolver::Registry, schema::Skill, schema::Source};
 use crate::state::State;
 
 /// `frank list` 参数。
@@ -27,7 +27,11 @@ struct Row {
     /// skill 名称。
     name: String,
 
-    /// 可见性 (frank-own / frank-recommended / user-public / user-company / user-private)。
+    /// 资源类型 (skill / mcp)。
+    #[tabled(rename = "type")]
+    r#type: String,
+
+    /// 可见性 (official / curated / community / team / private)。
     visibility: String,
 
     /// 归属 profile。
@@ -44,7 +48,8 @@ impl Row {
     fn from_skill(s: &Skill, status: &str) -> Self {
         Self {
             name: s.name.clone(),
-            // PascalCase → kebab-case 显示, 例: FrankOwn → frank-own
+            // PascalCase → kebab-case 显示, 例: Official → official
+            r#type: source_type_label(&s.source).to_string(),
             visibility: visibility_label(s.visibility),
             profile: s.profile.clone().unwrap_or_else(|| "personal".to_string()),
             status: status.to_string(),
@@ -53,16 +58,23 @@ impl Row {
     }
 }
 
+/// 把 Source 枚举映射成短词 (`skill` / `mcp`) 显示到表格 type 列。
+fn source_type_label(source: &Source) -> &'static str {
+    match source {
+        Source::Mcp { .. } => "mcp",
+        // git / local / upstream 都是 skill 文件夹 (走 symlink), 统一标 skill
+        _ => "skill",
+    }
+}
+
 fn visibility_label(v: crate::manifest::schema::Visibility) -> String {
-    use crate::manifest::schema::Visibility::{
-        FrankOwn, FrankRecommended, UserCompany, UserPrivate, UserPublic,
-    };
+    use crate::manifest::schema::Visibility::{Community, Curated, Official, Private, Team};
     match v {
-        FrankOwn => "frank-own".into(),
-        FrankRecommended => "frank-recommended".into(),
-        UserPublic => "user-public".into(),
-        UserCompany => "user-company".into(),
-        UserPrivate => "user-private".into(),
+        Official => "official".into(),
+        Curated => "curated".into(),
+        Community => "community".into(),
+        Team => "team".into(),
+        Private => "private".into(),
     }
 }
 

@@ -64,7 +64,7 @@ mod tests {
                 r#ref: "main".to_string(),
                 subpath: None,
             },
-            visibility: Visibility::FrankRecommended,
+            visibility: Visibility::Curated,
             auth: None,
             target_platforms: vec![],
             profile: profile.map(String::from),

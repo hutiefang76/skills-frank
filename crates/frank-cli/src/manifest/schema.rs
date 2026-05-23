@@ -126,50 +126,54 @@ pub enum Source {
     },
 }
 
-/// skill 可见性 / 权限分档 (v0.2 双层模型)。
+/// skill 可见性 / 权限分档 (v0.6 国际化命名)。
 ///
-/// # 两层 5 档
+/// # 两层 5 档 (v0.6 重命名, 老值通过 #[serde(alias)] 兼容)
 ///
-/// **Layer 1: frank 内置** (装 frank 默认带, 项目作者维护)
-/// - `frank-own` — 芳哥 (hutiefang76) 自研开源 skills (内置到 binary)
-/// - `frank-recommended` — 芳哥推荐的 upstream / 第三方 skills (manifest 列, 一键装)
+/// **Layer 1: frank 内置** (装 frank 默认带, 项目方维护)
+/// - `official` — frank 项目方自家维护的开源 skills (内置到 binary, 例 nacos-ops)
+/// - `curated` — frank 项目方精选的 upstream / 第三方 skills (一键装, 例 skill-creator)
 ///
-/// **Layer 2: 用户自定义** (用户自己加在 `~/.frank/manifests/`, 跟项目作者无关)
-/// - `user-public` — 用户自己开源的 skills
-/// - `user-company` — 用户**自己公司**的 skills (跟 frank 项目作者无关, 严禁泄露到本仓!)
-/// - `user-private` — 用户自己机密的 skills
+/// **Layer 2: 用户自定义** (用户自己加在 `~/.frank/manifests/`, 跟项目方无关)
+/// - `community` — 用户自己开源的 skills (任意公开 git URL)
+/// - `team` — 用户**所在团队/公司**的 skills (跟 frank 项目方无关, 严禁泄露到本仓!)
+/// - `private` — 用户自己机密的 skills (仅本机 / 个人凭据)
 ///
-/// # 老 v0.1 enum 值兼容
+/// # 老 v0.1 / v0.2 / v0.5 enum 值兼容
 ///
-/// 通过 `#[serde(alias)]` 兼容老 manifest, 不破 v0.1 用户的 ~/.frank/manifests/.
-/// 老 `public` → `frank-recommended`, 老 `own-public` → `frank-own`, 老 `private` → `user-private`.
+/// 通过 `#[serde(alias)]` 兼容老 manifest, 不破老用户 `~/.frank/manifests/`:
+/// - v0.5: `frank-own` → `official`, `frank-recommended` → `curated`
+/// - v0.5: `user-public` → `community`, `user-company` → `team`, `user-private` → `private`
+/// - v0.1: `own-public` / `public` 还映射到 `official` / `curated` (二级 alias)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Visibility {
-    /// frank 作者 (芳哥) 自研开源 — 装 frank 默认带, 维护者是项目方。
-    #[serde(alias = "own-public")]
-    FrankOwn,
+    /// frank 项目方自研开源 — 装 frank 默认带, 维护者是项目方 (例: nacos-ops, streampark-ops).
+    #[serde(alias = "frank-own", alias = "own-public")]
+    Official,
 
-    /// frank 作者推荐的 upstream / 第三方 skill — 默认列在 builtin manifest 里, 一键装。
-    #[serde(alias = "public")]
-    FrankRecommended,
+    /// frank 项目方精选的 upstream / 第三方 skill — 默认列在 builtin, 一键装 (例: skill-creator).
+    #[serde(alias = "frank-recommended", alias = "public")]
+    Curated,
 
-    /// 用户自己开源的 skills — 任意公开 git URL, 无凭据。
-    UserPublic,
+    /// 用户自己开源的 skills — 任意公开 git URL, 无凭据.
+    #[serde(alias = "user-public")]
+    Community,
 
-    /// 用户自己**公司**的 skills — 跟 frank 项目方无关, 严禁混入本仓! 用 ~/.frank/manifests/。
-    UserCompany,
+    /// 用户所在**团队/公司** skills — 跟 frank 项目方无关, 严禁混入本仓! 用 ~/.frank/manifests/.
+    #[serde(alias = "user-company")]
+    Team,
 
-    /// 用户自己私有的 skills — 仅本机 / 个人凭据访问。
-    #[serde(alias = "private")]
-    UserPrivate,
+    /// 用户自己私有的 skills — 仅本机 / 个人凭据访问.
+    #[serde(alias = "user-private")]
+    Private,
 }
 
 impl Visibility {
-    /// 是否属于 frank 内置 (项目作者维护, 装 frank 默认有)。
+    /// 是否属于 frank 内置 (项目方维护, 装 frank 默认有 — official + curated)。
     #[must_use]
     pub fn is_frank_builtin(self) -> bool {
-        matches!(self, Self::FrankOwn | Self::FrankRecommended)
+        matches!(self, Self::Official | Self::Curated)
     }
 
     /// 是否属于用户自定义 (用户自己 manifest 加的)。
@@ -303,7 +307,10 @@ fn default_ref() -> String {
 }
 
 fn default_platforms() -> Vec<Platform> {
-    vec![Platform::Claude, Platform::Codex, Platform::Opencode]
+    // v0.6 收缩到稳定的两家. opencode 仍然是合法值, 用户在 manifest 显式写
+    // `target_platforms: [opencode]` 仍然装. 但默认不装 — opencode CLI 接口变动频繁,
+    // skill 装上去经常水土不服 (实测有过 SKILL.md YAML 解析炸的 case).
+    vec![Platform::Claude, Platform::Codex]
 }
 
 fn default_slash_platforms() -> Vec<Platform> {
@@ -334,7 +341,7 @@ skills:
 ";
         let m: Manifest = serde_yml::from_str(yaml).expect("parse minimal manifest");
         assert_eq!(m.skills.len(), 1);
-        assert!(matches!(m.skills[0].visibility, Visibility::FrankOwn));
+        assert!(matches!(m.skills[0].visibility, Visibility::Official));
         assert!(m.skills[0].visibility.is_frank_builtin());
     }
 
@@ -342,9 +349,9 @@ skills:
     #[test]
     fn parses_v01_aliases() {
         for (alias, expect) in [
-            ("own-public", Visibility::FrankOwn),
-            ("public", Visibility::FrankRecommended),
-            ("private", Visibility::UserPrivate),
+            ("own-public", Visibility::Official),
+            ("public", Visibility::Curated),
+            ("private", Visibility::Private),
         ] {
             let yaml = format!(
                 "schema_version: 1\nskills:\n  - name: x\n    source: {{ type: git, url: 'https://example/x.git' }}\n    visibility: {alias}\n"
@@ -380,7 +387,7 @@ skills:
 ";
         let m: Manifest = serde_yml::from_str(yaml).expect("parse user-company skill");
         let s = &m.skills[0];
-        assert!(matches!(s.visibility, Visibility::UserCompany));
+        assert!(matches!(s.visibility, Visibility::Team));
         assert!(s.visibility.is_user_custom());
         assert_eq!(s.require_network, NetworkReq::Vpn);
     }

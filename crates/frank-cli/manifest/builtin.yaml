@@ -1,13 +1,15 @@
-# Frank 内置 skills 清单 — frank 项目作者 (芳哥 / hutiefang76) 维护
+# Frank 内置 skills 清单 — 编译期 embed 进 binary (frank-cli 项目方维护)
 #
-# 这个文件随 frank 二进制一起分发, 包含两类:
+# 这个文件随 frank 二进制一起分发, 包含两类 (v0.6 国际化命名):
 #
-#   1. frank-own            — 芳哥自研开源 skills (装 frank 即拥有)
-#   2. frank-recommended    — 芳哥推荐的 upstream / 第三方 skills (一键装)
+#   1. official   — frank 项目方自研开源 skills (装 frank 即拥有, 例 nacos-ops)
+#   2. curated    — frank 项目方精选的 upstream / 第三方 skills (一键装, 例 skill-creator)
 #
-# 用户自己的 skills (无论公司 / 私有 / 开源) **不在此文件** — 放
-# ~/.frank/manifests/*.yaml. visibility 用 `user-*` 系列, 那是用户视角的分类
-# (跟 frank 项目作者无关). 详见 README "Skills 两层 5 档分类" 一节。
+# 用户自己的 skills (社区/团队/私有) **不在此文件** — 放 ~/.frank/manifests/*.yaml.
+# visibility 用 community / team / private (用户视角分类).
+#
+# 老 v0.5 命名 (frank-own / frank-recommended / user-public / user-company / user-private)
+# 通过 #[serde(alias)] 自动兼容, 不破老 manifest. 详见 README "Skills 两层 5 档分类".
 #
 # schema 详见 docs/DESIGN.md §7.1
 
@@ -16,7 +18,7 @@ profile: personal
 
 skills:
   # ═══════════════════════════════════════════════════════════════
-  # frank-recommended — 芳哥推荐 (upstream / 第三方, 装 frank 时一键)
+  # curated — frank 项目方精选 (upstream / 第三方, 装 frank 时一键)
   # ═══════════════════════════════════════════════════════════════
 
   # ───── frank 自家的 slash 命令 sub-skills (v0.5.2 新增) ─────
@@ -32,8 +34,8 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-bridge
-    visibility: frank-recommended
-    target_platforms: [claude, codex, opencode]
+    visibility: curated
+    target_platforms: [claude, codex]
 
   - name: frank-ask-gpt
     description: 转发给 codex CLI (gpt-5.5 Plus) — `/frank:ask:gpt <prompt>` 或 "问 gpt"
@@ -41,8 +43,8 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-gpt
-    visibility: frank-recommended
-    target_platforms: [claude, codex, opencode]
+    visibility: curated
+    target_platforms: [claude, codex]
 
   - name: frank-ask-claude
     description: 转发给 claude CLI (Pro/Max 订阅 opus) — `/frank:ask:claude <prompt>`
@@ -50,8 +52,8 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-claude
-    visibility: frank-recommended
-    target_platforms: [claude, codex, opencode]
+    visibility: curated
+    target_platforms: [claude, codex]
 
   - name: frank-ask-opencode
     description: 转发给 opencode CLI (Go 套餐 qwen3.6+) — `/frank:ask:opencode <prompt>`
@@ -59,8 +61,8 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-opencode
-    visibility: frank-recommended
-    target_platforms: [claude, codex, opencode]
+    visibility: curated
+    target_platforms: [claude, codex]
 
   - name: frank-ask-gemini
     description: 转发给 gemini CLI (Google) — `/frank:ask:gemini <prompt>`
@@ -68,8 +70,8 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-gemini
-    visibility: frank-recommended
-    target_platforms: [claude, codex, opencode]
+    visibility: curated
+    target_platforms: [claude, codex]
 
   - name: frank-mem-list
     description: 列出用户分布式记忆 (frank-memory) — `/frank:mem:list`
@@ -77,8 +79,8 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-mem-list
-    visibility: frank-recommended
-    target_platforms: [claude, codex, opencode]
+    visibility: curated
+    target_platforms: [claude, codex]
 
   - name: frank-mem-search
     description: 语义检索用户分布式记忆 — `/frank:mem:search <query>`
@@ -86,8 +88,8 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-mem-search
-    visibility: frank-recommended
-    target_platforms: [claude, codex, opencode]
+    visibility: curated
+    target_platforms: [claude, codex]
 
   # ───── upstream / 第三方 (anthropics / open-source) ─────
 
@@ -96,15 +98,15 @@ skills:
     source:
       type: git
       url: https://github.com/anthropics/skill-creator.git
-    visibility: frank-recommended
-    target_platforms: [claude, codex, opencode]
+    visibility: curated
+    target_platforms: [claude, codex]
 
   - name: superpowers
     description: 通用编程超能力 (TDD/debug/brainstorming, anthropics 官方)
     source:
       type: git
       url: https://github.com/anthropics/claude-superpowers.git
-    visibility: frank-recommended
+    visibility: curated
     target_platforms: [claude]
 
   # ===== frank-recommended MCP (v0.4 新增, 巧妙集成: source.type=mcp 自动写 ~/.claude.json) =====
@@ -115,7 +117,7 @@ skills:
       type: mcp
       command: npx
       args: ["-y", "@modelcontextprotocol/server-time"]
-    visibility: frank-recommended
+    visibility: curated
     target_platforms: [claude, codex]
 
   - name: mcp-sequential-thinking
@@ -124,7 +126,7 @@ skills:
       type: mcp
       command: npx
       args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    visibility: frank-recommended
+    visibility: curated
     target_platforms: [claude, codex]
 
   - name: mcp-fetch
@@ -133,7 +135,7 @@ skills:
       type: mcp
       command: uvx
       args: ["mcp-server-fetch"]
-    visibility: frank-recommended
+    visibility: curated
     target_platforms: [claude, codex]
 
   - name: mcp-context7
@@ -142,19 +144,17 @@ skills:
       type: mcp
       command: npx
       args: ["-y", "@upstash/context7-mcp"]
-    visibility: frank-recommended
+    visibility: curated
     target_platforms: [claude, codex]
 
   # ═══════════════════════════════════════════════════════════════
-  # frank-own — 芳哥 (hutiefang76) 自研开源 skills
+  # official — frank 项目方自研开源 skills (hutiefang76)
   #
-  # 自含原则 (v0.5 加入): 每个 frank-own skill 仓库必须**自带** 全部依赖 + setup
+  # 自含原则 (v0.5 加入): 每个 official skill 仓库必须**自带** 全部依赖 + setup
   # 脚本 (Python venv / npm install / 配置模板). frank install 只做"clone +
   # symlink 到 ~/.{claude,codex,opencode}/skills/", **不解析 dependencies**.
-  # 这样 skills 跟项目主仓 (skills-frank) 完全解耦, 不会因 kdwl 私有仓 / 内部
-  # 工具变化而连带破坏 frank.
-  #
-  # 用户原话: "frank-skills 只是辅助安装和管理".
+  # 这样 skills 跟项目主仓 (skills-frank) 完全解耦, 不会因私有仓 / 内部工具变化
+  # 而连带破坏 frank.
   # ═══════════════════════════════════════════════════════════════
 
   - name: nacos-ops
@@ -162,14 +162,14 @@ skills:
     source:
       type: git
       url: https://github.com/hutiefang76/skills-nacos-ops.git
-    visibility: frank-own
+    visibility: official
 
   - name: streampark-ops
     description: StreamPark Flink 作业管理 (提交/启停/查日志) — 依赖见 skill 内 SKILL.md
     source:
       type: git
       url: https://github.com/hutiefang76/skills-streampark-ops.git
-    visibility: frank-own
+    visibility: official
 
   # ── 以下 3 个 skill 仓库还没发布 (404), 留占位等你 push 仓库后启用 ──
   # 启用方法: 把对应 git url 仓库真发到 GitHub, 然后取消下方注释
@@ -177,14 +177,14 @@ skills:
   # - name: doris-ops
   #   description: TCHouse-D (Doris) 运维 (查表/性能/扩容)
   #   source: { type: git, url: https://github.com/hutiefang76/skills-doris-ops.git }
-  #   visibility: frank-own
+  #   visibility: official
   #
   # - name: feishu-read
   #   description: 飞书文档/表格/Excel/PDF 提取
   #   source: { type: git, url: https://github.com/hutiefang76/skills-feishu-read.git }
-  #   visibility: frank-own
+  #   visibility: official
   #
   # - name: dolphinscheduler-ops
   #   description: DolphinScheduler 任务运维 (查询/重跑/暂停)
   #   source: { type: git, url: https://github.com/hutiefang76/skills-dolphinscheduler-ops.git }
-  #   visibility: frank-own
+  #   visibility: official

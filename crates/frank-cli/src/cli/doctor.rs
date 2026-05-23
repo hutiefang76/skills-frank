@@ -232,10 +232,17 @@ fn check_state_drift() -> Vec<Check> {
     }
     // P2-3 followup: scan 只看 disk → state, 漏报 "state 有 disk 没" 的 drift.
     // 这里反向遍历一遍补全.
+    //
+    // v0.6 修: MCP server (source_ref = "mcp") **不在 ~/.{claude,codex,opencode}/skills/** 目录,
+    // 它们写到 ~/.claude.json mcpServers + ~/.codex/config.toml [mcp_servers.*]. scan_all 永远
+    // 不会 return MCP entry → 之前误报 mcp-time 为 orphan. 这里跳过 mcp 类 source 避免误报.
     let scanned_names: std::collections::HashSet<&str> =
         scanned.iter().map(|s| s.name.as_str()).collect();
     let mut state_orphans: Vec<String> = Vec::new();
     for entry in state.iter().filter(|e| e.enabled) {
+        if entry.source_ref == "mcp" {
+            continue; // MCP server 装到平台 config 文件不是 skills/, skip drift check.
+        }
         let sanitized = adapter::sanitize_name(&entry.name);
         if !scanned_names.contains(entry.name.as_str())
             && !scanned_names.contains(sanitized.as_str())

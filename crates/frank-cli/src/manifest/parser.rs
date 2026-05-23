@@ -160,7 +160,7 @@ skills:
         // 老 `private` 通过 serde alias 映射到 v0.2 `UserPrivate`
         assert!(matches!(
             merged[0].visibility,
-            crate::manifest::schema::Visibility::UserPrivate
+            crate::manifest::schema::Visibility::Private
         ));
     }
 
