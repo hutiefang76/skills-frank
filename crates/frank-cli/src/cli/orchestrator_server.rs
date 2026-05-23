@@ -68,6 +68,9 @@ struct SubmitReq {
     prompt: String,
     #[serde(default)]
     timeout: Option<u64>,
+    /// 可选 model (例 `opus`, `gpt-5.5`, `mimo-v2.5-pro`)。空时各家 CLI 用自家默认。
+    #[serde(default)]
+    model: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -120,6 +123,7 @@ pub async fn serve(addr: SocketAddr) -> Result<()> {
 
     let app = Router::new()
         .route("/", get(index))
+        .route("/providers", get(list_providers))
         .route("/jobs", get(list_jobs).post(submit_job))
         .route("/jobs/:id", get(get_job))
         .route("/jobs/:id/stream", get(ws_stream))
@@ -145,6 +149,96 @@ async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
 
+/// `/providers` 响应: 每家 CLI 的可用性 + 本机已配置的 model 列表。
+#[derive(Serialize)]
+struct ProviderInfo {
+    name: String,
+    available: bool,
+    models: Vec<String>,
+}
+
+/// `GET /providers` — 实时探测本机有哪些 AI CLI + 列出可用 model。
+///
+/// 不再硬编码 "Pro / Plus / setup-token" 这种用户套餐名 (用户隐私 / 不一定对).
+/// 替换成 `which <bin>` + 各家自己列 model 的方式.
+async fn list_providers() -> Json<Vec<ProviderInfo>> {
+    let names = ["claude", "codex", "opencode", "gemini"];
+    let mut out = Vec::with_capacity(names.len());
+    for name in names {
+        let available = which::which(name).is_ok();
+        let models = if available {
+            detect_models(name).await
+        } else {
+            Vec::new()
+        };
+        out.push(ProviderInfo {
+            name: name.to_string(),
+            available,
+            models,
+        });
+    }
+    Json(out)
+}
+
+/// 每家 CLI 自家的 model 列表来源 — 全部走本机数据, 不调外网。
+async fn detect_models(provider: &str) -> Vec<String> {
+    match provider {
+        // Anthropic 标准 alias (`claude --help` 文档: "alias 'sonnet' or 'opus'")
+        "claude" => vec!["opus".into(), "sonnet".into(), "haiku".into()],
+        // codex 用户本机 ~/.codex/models_cache.json (登录后 codex CLI 自己刷的)
+        "codex" => read_codex_models(),
+        // opencode: subprocess `opencode models` 一行一个
+        "opencode" => list_opencode_models().await,
+        // gemini CLI 没列模型命令, 用 Google 公开 alias
+        "gemini" => vec![
+            "gemini-2.5-pro".into(),
+            "gemini-2.5-flash".into(),
+            "gemini-2.0-flash".into(),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+fn read_codex_models() -> Vec<String> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    let path = home.join(".codex").join("models_cache.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    v.get("models")
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("slug").and_then(serde_json::Value::as_str))
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn list_opencode_models() -> Vec<String> {
+    let out = tokio::process::Command::new("opencode")
+        .arg("models")
+        .output()
+        .await
+        .ok();
+    let Some(out) = out else { return Vec::new() };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
+}
+
 async fn list_jobs(State(s): State<AppState>) -> Json<Vec<JobSummary>> {
     let jobs = s.jobs.read().await;
     let mut out: Vec<JobSummary> = jobs
@@ -167,7 +261,10 @@ async fn submit_job(
 ) -> Result<Json<SubmitResp>, (StatusCode, String)> {
     let provider =
         parse_provider(&req.provider).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-    let worker = LocalCliWorker::new(provider).with_timeout(req.timeout.unwrap_or(300));
+    let mut worker = LocalCliWorker::new(provider).with_timeout(req.timeout.unwrap_or(300));
+    if let Some(model) = req.model.as_ref().filter(|m| !m.trim().is_empty()) {
+        worker = worker.with_model(model);
+    }
     if !worker.health().await {
         return Err((
             StatusCode::BAD_REQUEST,

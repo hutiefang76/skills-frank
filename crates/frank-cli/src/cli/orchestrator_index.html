@@ -77,12 +77,13 @@
 <main>
   <div id="submit">
     <h2>提交新任务</h2>
-    <label>Provider</label>
-    <select id="provider">
-      <option value="codex">codex (gpt-5.5, Plus)</option>
-      <option value="claude">claude (Pro / setup-token)</option>
-      <option value="opencode">opencode (Go)</option>
-      <option value="gemini">gemini</option>
+    <label>① 选 CLI <span id="provider-hint" style="color:#888;font-weight:normal"></span></label>
+    <select id="provider" onchange="onProviderChange()">
+      <option value="">加载中...</option>
+    </select>
+    <label>② 选 Model <span id="model-hint" style="color:#888;font-weight:normal"></span></label>
+    <select id="model">
+      <option value="">(空 = 用 CLI 自家默认)</option>
     </select>
     <label>Prompt</label>
     <textarea id="prompt" placeholder="给 AI 的指令&#10;例: 用一句话告诉我你是什么模型"></textarea>
@@ -181,14 +182,17 @@ async function submitJob() {
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = '提交中…';
   try {
+    const body = {
+      provider: document.getElementById('provider').value,
+      prompt: document.getElementById('prompt').value,
+      timeout: parseInt(document.getElementById('timeout').value, 10),
+    };
+    const model = document.getElementById('model').value;
+    if (model) body.model = model;
     const resp = await fetch('/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: document.getElementById('provider').value,
-        prompt: document.getElementById('prompt').value,
-        timeout: parseInt(document.getElementById('timeout').value, 10),
-      }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       const text = await resp.text();
@@ -203,6 +207,61 @@ async function submitJob() {
     btn.disabled = false; btn.textContent = '▶ 提交';
   }
 }
+
+// 缓存 /providers 响应, onProviderChange 时切 model 下拉
+let PROVIDERS = [];
+
+async function loadProviders() {
+  try {
+    const resp = await fetch('/providers');
+    PROVIDERS = await resp.json();
+  } catch (e) {
+    PROVIDERS = [];
+  }
+  const select = document.getElementById('provider');
+  select.innerHTML = '';
+  const available = PROVIDERS.filter(p => p.available);
+  if (available.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '本机没探测到任何 CLI (装 claude/codex/opencode/gemini 之一)';
+    select.appendChild(opt);
+    document.getElementById('provider-hint').textContent = '';
+    return;
+  }
+  for (const p of available) {
+    const opt = document.createElement('option');
+    opt.value = p.name;
+    opt.textContent = `${p.name} (${p.models.length} model)`;
+    select.appendChild(opt);
+  }
+  const unavailable = PROVIDERS.filter(p => !p.available).map(p => p.name);
+  document.getElementById('provider-hint').textContent = unavailable.length
+    ? `(未探测: ${unavailable.join(', ')} — 装 CLI 后刷新)`
+    : '';
+  onProviderChange();
+}
+
+function onProviderChange() {
+  const name = document.getElementById('provider').value;
+  const sel = document.getElementById('model');
+  sel.innerHTML = '<option value="">(空 = 用 CLI 自家默认)</option>';
+  const p = PROVIDERS.find(x => x.name === name);
+  if (!p || p.models.length === 0) {
+    document.getElementById('model-hint').textContent = '(本机未发现 model, 用默认)';
+    return;
+  }
+  document.getElementById('model-hint').textContent = `本机 ${p.models.length} 个 model`;
+  for (const m of p.models) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    sel.appendChild(opt);
+  }
+}
+
+// 启动时拉
+loadProviders();
 
 function escapeHtml(s) {
   return (s || '').replace(/[&<>"']/g, c => ({

@@ -63,24 +63,51 @@ impl CliProvider {
 
     /// 按各家 `--help` 官方语法把 prompt 直接拼成 positional/flag arg。
     ///
-    /// - `claude --print <prompt>`            (`claude --help`: prompt 是 positional)
-    /// - `codex exec --skip-git-repo-check <prompt>`  (`codex exec --help`: PROMPT positional)
-    /// - `opencode run <message...>`          (`opencode run --help`: message 是 array)
-    /// - `gemini --prompt <prompt>`           (`gemini --help`: -p/--prompt 非交互模式)
+    /// - `claude [--model <m>] --print <prompt>`
+    /// - `codex exec --skip-git-repo-check [--model <m>] <prompt>`
+    /// - `opencode run [--model <m>] <message...>`
+    /// - `gemini [--model <m>] --prompt <prompt>`
     ///
     /// 之前版本用 `-` 占位走 stdin pipe — 各家行为不一致 (opencode 把 `-` 当字面 message),
     /// 且 tokio drop(stdin) 不可靠. 改成统一走 arg 后, stdin 全置 Stdio::null().
-    fn args(self, prompt: &str) -> Vec<String> {
+    fn args(self, prompt: &str, model: Option<&str>) -> Vec<String> {
+        let mut args: Vec<String> = Vec::new();
         match self {
-            Self::Claude => vec!["--print".into(), prompt.into()],
-            Self::Codex => vec![
-                "exec".into(),
-                "--skip-git-repo-check".into(),
-                prompt.into(),
-            ],
-            Self::Opencode => vec!["run".into(), prompt.into()],
-            Self::Gemini => vec!["--prompt".into(), prompt.into()],
+            Self::Claude => {
+                args.push("--print".into());
+                if let Some(m) = model {
+                    args.push("--model".into());
+                    args.push(m.into());
+                }
+                args.push(prompt.into());
+            }
+            Self::Codex => {
+                args.push("exec".into());
+                args.push("--skip-git-repo-check".into());
+                if let Some(m) = model {
+                    args.push("--model".into());
+                    args.push(m.into());
+                }
+                args.push(prompt.into());
+            }
+            Self::Opencode => {
+                args.push("run".into());
+                if let Some(m) = model {
+                    args.push("--model".into());
+                    args.push(m.into());
+                }
+                args.push(prompt.into());
+            }
+            Self::Gemini => {
+                if let Some(m) = model {
+                    args.push("--model".into());
+                    args.push(m.into());
+                }
+                args.push("--prompt".into());
+                args.push(prompt.into());
+            }
         }
+        args
     }
 }
 
@@ -94,6 +121,8 @@ pub struct LocalCliWorker {
     timeout: Duration,
     /// 可选 working directory (Job 隔离 workspace)。
     workspace: Option<std::path::PathBuf>,
+    /// 可选 model (传给 CLI 的 --model 参数)。空时各家 CLI 用自家默认。
+    model: Option<String>,
 }
 
 impl LocalCliWorker {
@@ -105,7 +134,15 @@ impl LocalCliWorker {
             provider,
             timeout: Duration::from_secs(300),
             workspace: None,
+            model: None,
         }
+    }
+
+    /// 设 model (例 "opus" / "gpt-5.5" / "mimo-v2.5-pro")。空 = 用 CLI 自家默认。
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
     }
 
     /// 设 step 工作目录 (Executor 给每个 Job 一个独立 dir)。
@@ -137,7 +174,7 @@ impl Worker for LocalCliWorker {
     async fn run(&self, step: &Step, log_tx: mpsc::Sender<LogLine>) -> Result<StepOutput> {
         let bin = self.provider.bin();
         // 所有 4 家 CLI 官方语法都接 prompt 作 positional/flag arg, 不再走 stdin.
-        let args = self.provider.args(&step.prompt);
+        let args = self.provider.args(&step.prompt, self.model.as_deref());
 
         let _ = log_tx
             .send(LogLine::info(format!(
