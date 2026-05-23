@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -61,13 +61,25 @@ impl CliProvider {
         }
     }
 
-    /// 默认调用参数 (非交互 exec 模式)。prompt 通过 stdin 投递, 避免 shell 转义 + 太长 arg 风险。
-    fn args(self) -> Vec<&'static str> {
+    /// 按各家 `--help` 官方语法把 prompt 直接拼成 positional/flag arg。
+    ///
+    /// - `claude --print <prompt>`            (`claude --help`: prompt 是 positional)
+    /// - `codex exec --skip-git-repo-check <prompt>`  (`codex exec --help`: PROMPT positional)
+    /// - `opencode run <message...>`          (`opencode run --help`: message 是 array)
+    /// - `gemini --prompt <prompt>`           (`gemini --help`: -p/--prompt 非交互模式)
+    ///
+    /// 之前版本用 `-` 占位走 stdin pipe — 各家行为不一致 (opencode 把 `-` 当字面 message),
+    /// 且 tokio drop(stdin) 不可靠. 改成统一走 arg 后, stdin 全置 Stdio::null().
+    fn args(self, prompt: &str) -> Vec<String> {
         match self {
-            Self::Claude => vec!["--print"],
-            Self::Codex => vec!["exec", "--skip-git-repo-check", "-"],
-            Self::Opencode => vec!["run", "-"],
-            Self::Gemini => vec!["--prompt", "-"],
+            Self::Claude => vec!["--print".into(), prompt.into()],
+            Self::Codex => vec![
+                "exec".into(),
+                "--skip-git-repo-check".into(),
+                prompt.into(),
+            ],
+            Self::Opencode => vec!["run".into(), prompt.into()],
+            Self::Gemini => vec!["--prompt".into(), prompt.into()],
         }
     }
 }
@@ -122,30 +134,23 @@ impl Worker for LocalCliWorker {
         which::which(self.provider.bin()).is_ok()
     }
 
-    #[allow(clippy::too_many_lines)] // 分支 (prompt arg vs stdin) + IO + 日志 + timeout 都在 run 里, 拆函数会重复 borrow
     async fn run(&self, step: &Step, log_tx: mpsc::Sender<LogLine>) -> Result<StepOutput> {
         let bin = self.provider.bin();
-        let args = self.provider.args();
-        // claude --print 实测: 新版要求 prompt 必须作为 argument (stdin pipe EOF 拿不到).
-        // 其他 CLI (codex/opencode/gemini) 用 `-` 占位符接 stdin, 仍走 pipe.
-        let prompt_via_arg = matches!(self.provider, CliProvider::Claude);
+        // 所有 4 家 CLI 官方语法都接 prompt 作 positional/flag arg, 不再走 stdin.
+        let args = self.provider.args(&step.prompt);
 
         let _ = log_tx
             .send(LogLine::info(format!(
-                "spawn `{} {}` (workspace={:?}, timeout={}s)",
-                bin,
-                args.join(" "),
+                "spawn `{bin}` with {} args (workspace={:?}, timeout={}s)",
+                args.len(),
                 self.workspace.as_deref().map(std::path::Path::display),
                 self.timeout.as_secs()
             )))
             .await;
 
         let mut cmd = Command::new(bin);
-        cmd.args(&args);
-        if prompt_via_arg {
-            cmd.arg(&step.prompt);
-        }
-        cmd.stdin(Stdio::piped())
+        cmd.args(&args)
+            .stdin(Stdio::null()) // 不喂 stdin — prompt 已是 arg, 子进程别等输入
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
@@ -157,22 +162,6 @@ impl Worker for LocalCliWorker {
         let mut child = cmd
             .spawn()
             .with_context(|| format!("spawn `{bin}` (是否安装 + PATH 里?)"))?;
-
-        // 把 prompt 塞 stdin (claude 已通过 arg 拿到了, 这里跳过, 直接 close stdin 让 CLI 不卡等输入)
-        if let Some(mut stdin) = child.stdin.take() {
-            if !prompt_via_arg {
-                stdin
-                    .write_all(step.prompt.as_bytes())
-                    .await
-                    .context("write prompt to subprocess stdin")?;
-            }
-            // shutdown() 显式刷缓冲 + close fd, 触发 EOF.
-            // drop 在 tokio runtime 下不保证立即 close, 必须 shutdown.
-            stdin
-                .shutdown()
-                .await
-                .context("shutdown subprocess stdin")?;
-        }
 
         let stdout = child.stdout.take().context("take subprocess stdout")?;
         let stderr = child.stderr.take().context("take subprocess stderr")?;
