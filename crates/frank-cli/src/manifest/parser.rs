@@ -2,7 +2,11 @@
 //!
 //! # 加载顺序 (后加载覆盖前加载)
 //!
-//! 1. 项目内置: `<repo>/manifest/public.yaml` (公开 skills)
+//! 0. **编译期 embed**: `crates/frank-cli/manifest/builtin.yaml` (`include_str!`)
+//!    — brew / cargo install 装的 binary 必带, 不依赖磁盘路径。v0.5.2 起新增,
+//!    解决 "binary 装到 /opt/homebrew/bin/ 找不到 manifest" 产品 bug。
+//! 1. **磁盘内置**: `<repo>/manifest/{builtin,public}.yaml` 或 `<exe>/../manifest/`
+//!    (fork / dev 模式 override 用; 没有就用 step 0 的 embed)
 //! 2. 用户私有: `~/.frank/manifests/*.yaml` (含公司 skills)
 //! 3. 环境变量: `FRANK_EXTRA_MANIFEST` 指向额外文件
 //!
@@ -15,6 +19,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::manifest::schema::{Manifest, Skill};
+
+/// 编译期把 `crates/frank-cli/manifest/builtin.yaml` 内容打进 binary。
+///
+/// 这样 release 出的二进制装哪儿都自带 frank-own / frank-recommended 清单,
+/// 不依赖运行时磁盘路径 (修 v0.5.1 brew 装后 `frank list` 报 "no manifest found").
+const BUILTIN_YAML: &str = include_str!("../../manifest/builtin.yaml");
 
 /// 从单个 YAML 文件加载 manifest。
 ///
@@ -38,7 +48,13 @@ pub fn load_file(path: &Path) -> Result<Manifest> {
 pub fn discover() -> Result<Vec<Manifest>> {
     let mut manifests = Vec::new();
 
-    // 1. 项目内置 public manifest
+    // 0. 编译期 embed 的 builtin.yaml — 总是装载, 保证装哪儿都有基础 skills 清单
+    let embedded: Manifest = serde_yml::from_str(BUILTIN_YAML)
+        .context("parse embedded builtin.yaml (compile-time fixture, should never fail)")?;
+    tracing::debug!(skills = embedded.skills.len(), "embedded builtin loaded");
+    manifests.push(embedded);
+
+    // 1. 项目内置 public manifest (fork / dev 模式 override 用)
     if let Some(p) = built_in_public_path() {
         if p.exists() {
             manifests.push(load_file(&p)?);
