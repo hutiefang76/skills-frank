@@ -192,6 +192,7 @@ impl Worker for LocalCliWorker {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         strip_empty_api_keys(&mut cmd);
+        apply_proxy_config(&mut cmd);
         if let Some(ws) = &self.workspace {
             cmd.current_dir(ws);
         }
@@ -297,6 +298,49 @@ fn strip_empty_api_keys(cmd: &mut Command) {
         if std::env::var(key).is_ok_and(|v| v.trim().is_empty()) {
             cmd.env_remove(key);
             tracing::debug!("unset empty {key} from subprocess env (avoid 401 trap)");
+        }
+    }
+}
+
+/// 从 `~/.frank/config.toml` 读 `[proxy]` 配置并 inject 给子进程 env。
+///
+/// 修 v0.6.1 真问题: brew services 启的 daemon **不读 ~/.zshrc** 也**不继承用户 shell**
+/// 的 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY env, 导致 spawn 的 claude/codex 直连 openai.com /
+/// anthropic.com 走默认网络 → 国内 Clash 用户疯狂 reconnect.
+///
+/// config.toml 格式:
+/// ```toml
+/// [proxy]
+/// http  = "http://127.0.0.1:7897"
+/// https = "http://127.0.0.1:7897"
+/// all   = "http://127.0.0.1:7897"
+/// no    = "localhost,127.0.0.1,::1,.local"
+/// ```
+///
+/// 缺字段就不 inject (用户机器没配 proxy 时安全不动 env).
+pub fn apply_proxy_config(cmd: &mut Command) {
+    let Some(home) = dirs::home_dir() else { return };
+    let path = home.join(".frank").join("config.toml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(v) = text.parse::<toml::Value>() else {
+        return;
+    };
+    let Some(proxy) = v.get("proxy").and_then(toml::Value::as_table) else {
+        return;
+    };
+    // 同时设大写 + 小写两套, 兼容各家 CLI 习惯 (golang 程序看小写, python 程序看大写)
+    for (toml_key, env_keys) in [
+        ("http", &["HTTP_PROXY", "http_proxy"][..]),
+        ("https", &["HTTPS_PROXY", "https_proxy"][..]),
+        ("all", &["ALL_PROXY", "all_proxy"][..]),
+        ("no", &["NO_PROXY", "no_proxy"][..]),
+    ] {
+        if let Some(val) = proxy.get(toml_key).and_then(toml::Value::as_str) {
+            for env_key in env_keys {
+                cmd.env(env_key, val);
+            }
         }
     }
 }

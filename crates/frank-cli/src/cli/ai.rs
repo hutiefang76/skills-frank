@@ -129,6 +129,7 @@ async fn run_ask(args: AskArgs) -> Result<()> {
         .stderr(Stdio::null()) // 一问一答不打扰用户, 隐 stderr
         .kill_on_drop(true);
     strip_empty_api_keys(&mut cmd);
+    frank_orchestrator::worker::local::apply_proxy_config(&mut cmd);
 
     let mut child = cmd
         .spawn()

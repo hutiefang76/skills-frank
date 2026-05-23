@@ -40,6 +40,10 @@ reqwest = { version = "0.13", default-features = false, features = [
 # LocalCliWorker: PATH 里查 binary (which::which)
 which = "7.0"
 
+# 读 ~/.frank/config.toml 拿 proxy 配置 (v0.6.1, 修 brew services daemon 不继承 user proxy)
+toml = "0.8"
+dirs = "5.0"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
 
