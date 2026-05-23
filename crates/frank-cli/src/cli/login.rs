@@ -71,9 +71,43 @@ pub fn run(args: Args) -> Result<()> {
     if let Some(host) = args.from_host {
         return login_from_host(&host);
     }
-    bail!(
-        "用法:\n  frank login --from-host <ssh-host>   # ssh 拉服务器 .env 里的 token\n  frank login --token <token>          # 直接手敲\n  frank login --show                   # 看当前 token (脱敏)\n  frank logout                         # 删 token"
-    )
+    print_guide();
+    Ok(())
+}
+
+/// 无参数 `frank login` 显示的友好引导. 不提项目内部 host 名 (如 `tx`) —
+/// 那是部署者的私事, 用户不该被教育.
+fn print_guide() {
+    use owo_colors::{OwoColorize, Stream};
+
+    crate::log::ui::section("frank login — 配置 sync-agent token");
+    println!();
+    println!("frank 的 memory / 跨设备同步需要 token 访问后端 sync-agent.");
+    println!(
+        "skill / daemon / orchestrator 本地功能 {} token (可跳过此步).",
+        "不需要".if_supports_color(Stream::Stdout, |t| t.bold())
+    );
+    println!();
+    println!(
+        "{} (从你部署的 sync-agent 拿的, 或同事给的):",
+        "有 token 的话".if_supports_color(Stream::Stdout, |t| t.bold())
+    );
+    println!("  frank login --token <token>");
+    println!();
+    println!(
+        "{} (高级):",
+        "自己部署了 sync-agent + SSH 配好".if_supports_color(Stream::Stdout, |t| t.bold())
+    );
+    println!("  frank login --from-host <your-ssh-alias>      # 自动从远端 /opt/frank/.env 抓");
+    println!();
+    println!(
+        "{} 部署一个:",
+        "还没 sync-agent?".if_supports_color(Stream::Stdout, |t| t.bold())
+    );
+    println!("  https://github.com/hutiefang76/skills-frank/blob/main/deploy/README.md");
+    println!();
+    println!("已登录看 token (脱敏): frank login --show");
+    println!("登出:                  frank logout");
 }
 
 fn token_path() -> Result<PathBuf> {

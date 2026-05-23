@@ -94,6 +94,23 @@ fn frank_binary_path() -> Result<PathBuf> {
 fn install(port: u16) -> Result<()> {
     let plist = plist_path()?;
     let bin = frank_binary_path()?;
+
+    // 如果用户走 Homebrew 装的, 优先推荐 brew services (它会管 launchd plist + brew uninstall 时
+    // 自动 stop). 这里不强制阻止 — 自部署 / Linux / Windows 用户必须靠 daemon install.
+    if bin.to_string_lossy().contains("/Cellar/frank/") || bin.to_string_lossy().contains("/opt/homebrew/")
+    {
+        crate::log::ui::warn(
+            "检测到 frank 是 Homebrew 装的 — 推荐用 `brew services start frank` 启动",
+        );
+        crate::log::ui::info("Homebrew 模式: 启停走 brew, `brew uninstall frank` 自动清服务");
+        crate::log::ui::info("  brew services start frank      # 启 (自动注册 launchd)");
+        crate::log::ui::info("  brew services list             # 状态");
+        crate::log::ui::info("  brew services stop frank       # 停");
+        crate::log::ui::info("");
+        crate::log::ui::info("继续 `frank daemon install` 也能用 — 但会注册第二个 launchd 项, 跟");
+        crate::log::ui::info("brew services 抢端口. 如果你坚持自管, 先 `brew services stop frank`.");
+        crate::log::ui::info("");
+    }
     let log_dir = dirs::home_dir()
         .context("home")?
         .join(".frank")
