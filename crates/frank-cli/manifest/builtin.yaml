@@ -19,6 +19,78 @@ skills:
   # frank-recommended — 芳哥推荐 (upstream / 第三方, 装 frank 时一键)
   # ═══════════════════════════════════════════════════════════════
 
+  # ───── frank 自家的 slash 命令 sub-skills (v0.5.2 新增) ─────
+  # 触发 /frank:ask:gpt / /frank:mem:list 等 slash. 装到三平台 skills/ 后, Claude
+  # Code / codex / opencode 看到 description 就能识别. 内部 shell out 到 `frank`
+  # CLI, 所以必须先有 frank binary (brew install hutiefang76/frank/frank).
+  #
+  # 单 repo skills-frank-bridge 含全 7 个 sub-skill, 用 git+subpath 引用避免发 7 个 repo.
+
+  - name: frank-bridge
+    description: AI 之间一问一答桥 (`/frank:<provider> <prompt>` 触发, 转发给目标 CLI)
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-frank-bridge.git
+      subpath: frank-bridge
+    visibility: frank-recommended
+    target_platforms: [claude, codex, opencode]
+
+  - name: frank-ask-gpt
+    description: 转发给 codex CLI (gpt-5.5 Plus) — `/frank:ask:gpt <prompt>` 或 "问 gpt"
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-frank-bridge.git
+      subpath: frank-ask-gpt
+    visibility: frank-recommended
+    target_platforms: [claude, codex, opencode]
+
+  - name: frank-ask-claude
+    description: 转发给 claude CLI (Pro/Max 订阅 opus) — `/frank:ask:claude <prompt>`
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-frank-bridge.git
+      subpath: frank-ask-claude
+    visibility: frank-recommended
+    target_platforms: [claude, codex, opencode]
+
+  - name: frank-ask-opencode
+    description: 转发给 opencode CLI (Go 套餐 qwen3.6+) — `/frank:ask:opencode <prompt>`
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-frank-bridge.git
+      subpath: frank-ask-opencode
+    visibility: frank-recommended
+    target_platforms: [claude, codex, opencode]
+
+  - name: frank-ask-gemini
+    description: 转发给 gemini CLI (Google) — `/frank:ask:gemini <prompt>`
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-frank-bridge.git
+      subpath: frank-ask-gemini
+    visibility: frank-recommended
+    target_platforms: [claude, codex, opencode]
+
+  - name: frank-mem-list
+    description: 列出用户分布式记忆 (frank-memory) — `/frank:mem:list`
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-frank-bridge.git
+      subpath: frank-mem-list
+    visibility: frank-recommended
+    target_platforms: [claude, codex, opencode]
+
+  - name: frank-mem-search
+    description: 语义检索用户分布式记忆 — `/frank:mem:search <query>`
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-frank-bridge.git
+      subpath: frank-mem-search
+    visibility: frank-recommended
+    target_platforms: [claude, codex, opencode]
+
+  # ───── upstream / 第三方 (anthropics / open-source) ─────
+
   - name: skill-creator
     description: 创建/迭代新 skill 的元 skill (anthropics 官方)
     source:
