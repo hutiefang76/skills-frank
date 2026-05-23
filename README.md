@@ -297,18 +297,45 @@ brew untap hutiefang76/frank       # (可选) 删 tap 注册
 
 Homebrew Formula API **没有 uninstall hook**(只有 `def caveats` 提示)。设计上 brew 只管 binary,用户数据不动 — 这样 `brew install ↔ brew uninstall` 反复跑(升级降级)不丢数据。所以 frank 提供 `frank cleanup` + 上面的 `uninstall-frank.sh` 让用户**主动**触发完整清理,符合 brew 习惯。
 
-### memory 子命令（P5 进行中,需 sync-agent 在线）
+### memory 子命令(P5, v0.8 真模式)
+
+frank memory 走分布式向量检索: 语义召回, 跨设备共享。客户端 → sync-agent (远程或本地) → qdrant。
 
 ```bash
-# 写入一条记忆
-frank memory add "user prefers vim over emacs" --user alice
+# 写入一条 raw fact (跳过 LLM 抽)
+frank memory add-raw "user prefers vim over emacs" --user alice
 
-# 语义检索
+# v0.8 新: --extract-with claude/codex 调本机 cli 把长文本抽成多条独立 fact 再存
+# 零额外 token 费 — 复用用户已登录 cli 订阅
+frank memory add "I switched from emacs to vim 3 years ago because of macros" \
+    --user alice --extract-with claude
+# → 客户端 claude --print 抽出 ["user switched from emacs to vim 3 years ago",
+#                              "user values macro support in editors"]
+# → 逐条 add_raw 到 qdrant
+
+# 语义检索 (问 editor 能召回 vim 相关)
 frank memory search "editor preference" --user alice
 
-# 列出
+# 列出 / 单查 / 删除
 frank memory list --user alice
+frank memory get <uuid>
+frank memory delete <uuid>
 ```
+
+### frank ai ask 共享上下文 (v0.8 新)
+
+```bash
+# 普通 ask (不注入上下文, 跟 v0.7 一致)
+frank ai ask --to codex "implement quicksort in Rust"
+
+# 加 --context-from <session>: ask 前 search memory top-3 注入 prompt 前缀,
+# ask 后异步存 (Q+A) 进 memory. 同 session 的 claude/codex/gemini 跨 agent 共享
+frank ai ask --to codex --context-from default "review 刚才的实现"
+# → frank 自动: search "review 刚才的实现" → 找到刚刚 claude 写的代码 → 拼到 prompt 前
+# → codex 看得到上下文, 能真 review 而不是凭空生成
+```
+
+SKILL.md (`/frank:ask:gpt` 等) 已教 claude/codex 识别"刚才/那段/继续"等指代表达时自动加 `--context-from default`。
 
 ## 开发
 

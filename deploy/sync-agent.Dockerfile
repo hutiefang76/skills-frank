@@ -24,24 +24,21 @@
 # 只是 MSRV 提示, 构建用 newer cargo 完全兼容.
 FROM rust:1-slim-bookworm AS builder
 
-# 切换到阿里云镜像: deb.debian.org 在国内访问偶尔 timeout (60+秒/包), 阿里云镜像稳定
-# Debian 12 bookworm 用 deb822 格式 (debian.sources)
-RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
-        /etc/apt/sources.list.d/debian.sources
-
-# protobuf-compiler: qdrant-client 走 gRPC, build.rs 需要 protoc 生成 PB stub
-# pkg-config + libssl-dev: 保险起见装上 (reqwest 走 rustls 理论不需要, 但 transitive 偶尔会 link;
-#                          不装的话失败成本高、装上的话只在 builder stage 增加体积, runtime 不受影响)
-# g++ + libstdc++-12-dev: v0.8 加 fastembed → ort (ONNX runtime) 静态链 C++ stdlib (libstdc++) 需要
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        pkg-config \
-        libssl-dev \
-        protobuf-compiler \
-        g++ \
-        libstdc++-12-dev \
-        ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# v0.8: deb.debian.org 走 fastly CDN, 跨平台 emulation 下比阿里云稳定
+# (实测阿里云在 buildx --platform 模拟下偶尔 connection failed)
+# 重试 3 次 + 短 timeout, 防偶发网络抖动
+RUN for i in 1 2 3; do \
+        apt-get update \
+        && apt-get install -y --no-install-recommends \
+            pkg-config \
+            libssl-dev \
+            protobuf-compiler \
+            g++ \
+            libstdc++-12-dev \
+            ca-certificates \
+        && rm -rf /var/lib/apt/lists/* \
+        && break || { echo "apt attempt $i failed, retry..."; sleep 5; }; \
+    done
 
 WORKDIR /workspace
 
