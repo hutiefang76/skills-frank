@@ -24,6 +24,7 @@ pub mod enable;
 pub mod import;
 pub mod install;
 pub mod list;
+pub mod login;
 pub mod memory;
 pub mod orchestrator;
 pub mod orchestrator_server;
@@ -101,6 +102,12 @@ enum Commands {
     /// 后台 daemon 服务管理 — `frank daemon install/start/stop/status` (Q4: 自启 orchestrator)。
     Daemon(daemon::Args),
 
+    /// 配置 sync-agent 鉴权 token (一键 `--from-host tx` 或 `--token <xxx>`)。
+    Login(login::Args),
+
+    /// 移除已配 token (~/.frank/.token)。
+    Logout,
+
     // ----- 以下为占位, P1 实现 -----
     /// 升级到最新版本 (P1 待实现)。
     Update,
@@ -137,6 +144,13 @@ pub fn run() -> Result<()> {
         Commands::Ai(args) => ai::run(args),
         Commands::Sync(args) => sync::run(args),
         Commands::Daemon(args) => daemon::run(args),
+        Commands::Login(args) => login::run(args),
+        Commands::Logout => login::run(login::Args {
+            command: Some(login::LoginCommand::Logout),
+            token: None,
+            from_host: None,
+            show: false,
+        }),
         Commands::Update => stub("update"),
         Commands::Rollback => stub("rollback"),
     }

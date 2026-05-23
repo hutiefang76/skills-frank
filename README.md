@@ -108,6 +108,23 @@ frank scan            # 扫本机三平台 skills 目录
 frank list            # 列 manifest 里的 skills
 ```
 
+### 配置 sync-agent token (v0.5.1, `frank login`)
+
+sync-agent 在 Caddy 层用 `X-Frank-Token` header 守 `/memory/*` `/orchestrator/*`,
+没 token 直接 401。**装完 frank 跑 `frank login` 一次,以后所有 memory / orchestrator
+命令都自动带 token**:
+
+```bash
+frank login --from-host tx        # ssh 拉 /opt/frank/.env 里的 FRANK_API_TOKEN, 写本机 ~/.frank/.token (600 权限)
+frank login --token <xxx>         # 手敲 token (适合 1Password / 团队分发)
+frank login --show                # 看当前 token (脱敏: 前 4 + 后 4)
+frank logout                      # 删本机 token
+```
+
+> **注意**: `X-Frank-Token` 是访问**你公网 sync-agent** 的鉴权票据,**跟 LLM 计费 token
+> 完全无关**。`frank memory list/search` 只读 qdrant 不调 LLM,**零计费**;
+> 调 LLM 的只有 `frank ai ask` 和 `frank memory add` (后者要 LLM 抽 fact)。
+
 ### daemon 自启 + Web UI (v0.5 新增, macOS launchd)
 
 `frank` 设计上是后台 daemon: 注册 launchd 一次就**永远在跑** (登录自启, 挂了自动重启),
