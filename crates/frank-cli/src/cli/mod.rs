@@ -71,6 +71,9 @@ enum Commands {
     /// 卸载: 从三平台移除链接 + 删 state 记录 (保留 cache)。
     Uninstall(uninstall::Args),
 
+    /// 一行清干净所有 frank 装的东西 (skill+MCP+cache) + 引导 brew uninstall。
+    Cleanup,
+
     /// 启用: 重建已 disabled 的链接。
     Enable(enable::Args),
 
@@ -141,6 +144,7 @@ pub fn run() -> Result<()> {
         Commands::Install(args) => install::run(args),
         Commands::List(args) => list::run(args),
         Commands::Uninstall(args) => uninstall::run(args),
+        Commands::Cleanup => uninstall::run_cleanup(),
         Commands::Enable(args) => enable::run(args),
         Commands::Disable(args) => disable::run(args),
         Commands::Memory(args) => memory::run(args),

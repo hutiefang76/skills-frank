@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "frank"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "frank-memory"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -959,7 +959,7 @@ dependencies = [
 
 [[package]]
 name = "frank-orchestrator"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "frank-sync-agent"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "async-trait",

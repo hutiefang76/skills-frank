@@ -1,6 +1,7 @@
 //! `frank uninstall` 子命令: 从三平台移除链接 + 删 state 记录 + (可选) 删 git cache。
 //!
 //! v0.7.1 起加 `--all` (清掉所有 managed) 和 `--purge-cache` (顺手删 ~/.frank/cache/<hash>).
+//! v0.7.2 起 `frank cleanup` = `uninstall --all --purge-cache` + 提示 brew uninstall 下一步.
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
@@ -23,6 +24,26 @@ pub struct Args {
     /// 默认不删 (省得下次 install 同 skill 又 clone 一遍).
     #[arg(long)]
     pub purge_cache: bool,
+}
+
+/// `frank cleanup` — 一行清干净所有 frank 装的东西 (skill + MCP + cache), 引导 brew uninstall.
+///
+/// 等价 `frank uninstall --all --purge-cache` + 友好的下一步提示。
+pub fn run_cleanup() -> Result<()> {
+    crate::log::ui::section("frank cleanup — 一行清掉所有 frank 装的东西");
+    run(Args {
+        name: None,
+        all: true,
+        purge_cache: true,
+    })?;
+    println!();
+    crate::log::ui::info("剩下两步 (Homebrew 自己的事, frank 帮不上):");
+    println!("  brew services stop frank          # 停 launchd 服务");
+    println!("  brew uninstall frank              # 删 binary (brew 自动 untap)");
+    println!();
+    crate::log::ui::info("可选: 清 ~/.frank/ (token / state / logs)");
+    println!("  rm -rf ~/.frank/                  # 保留: 保留账户配置以便重装继续用");
+    Ok(())
 }
 
 /// 执行 uninstall 命令。

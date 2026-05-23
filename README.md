@@ -192,6 +192,46 @@ frank orchestrator demo --provider claude --prompt "Say hi"
 | `codex` timeout | high-reasoning 慢,默认 120s 不够 | `--timeout 300` 或更高 |
 | `frank orchestrator providers` 显示 ✗ | CLI 没装在 PATH 里 | `brew install` / `npm i -g` 对应 CLI |
 
+### 卸载 (v0.7.2+)
+
+⚠️ **重要**: Homebrew 设计哲学是 `brew uninstall` **不动用户数据**(跟 ollama / postgres / redis 一致 — 升降级反复跑不能丢用户数据)。所以 frank 的"用户数据"(三平台 skill symlink、`~/.claude.json mcpServers` 注入、`~/.frank/`)brew 都不会自动清。
+
+#### 一键卸载脚本(推荐)
+
+```bash
+# 远程一行 (走代理也 work, 5 个步骤交互式确认)
+curl -fsSL https://raw.githubusercontent.com/hutiefang76/skills-frank/main/scripts/uninstall-frank.sh | bash
+
+# 或本地跑
+git clone https://github.com/hutiefang76/skills-frank.git /tmp/sf && bash /tmp/sf/scripts/uninstall-frank.sh
+
+# 全自动 yes (不交互)
+curl -fsSL https://raw.githubusercontent.com/hutiefang76/skills-frank/main/scripts/uninstall-frank.sh | bash -s -- --yes
+
+# 保留 ~/.frank/ (token + state, 以便重装直接接管)
+bash scripts/uninstall-frank.sh --keep-config
+```
+
+脚本干 4 件事(每步交互式 y/N 确认):
+1. `frank cleanup` — 清三平台 skill symlink + MCP 注入 (`~/.claude.json mcpServers` + `~/.codex/config.toml mcp_servers`) + git cache (`~/.frank/cache/`)
+2. `brew services stop frank` — 停 launchd daemon
+3. `brew uninstall frank` — 删 binary (brew 自动 untap 跟自动 stop service)
+4. `rm -rf ~/.frank/` — 清 token / state / logs / ai_history (可选)
+
+#### 手动卸载
+
+```bash
+frank cleanup                      # frank 自家的事 (skill+MCP+cache)
+brew services stop frank           # 停服务
+brew uninstall frank               # 删 binary
+rm -rf ~/.frank/                   # (可选) 用户数据
+brew untap hutiefang76/frank       # (可选) 删 tap 注册
+```
+
+#### 为什么 `brew uninstall` 不自动调 `frank cleanup`?
+
+Homebrew Formula API **没有 uninstall hook**(只有 `def caveats` 提示)。设计上 brew 只管 binary,用户数据不动 — 这样 `brew install ↔ brew uninstall` 反复跑(升级降级)不丢数据。所以 frank 提供 `frank cleanup` + 上面的 `uninstall-frank.sh` 让用户**主动**触发完整清理,符合 brew 习惯。
+
 ### memory 子命令（P5 进行中,需 sync-agent 在线）
 
 ```bash
