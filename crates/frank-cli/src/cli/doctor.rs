@@ -123,6 +123,7 @@ pub fn run(args: Args) -> Result<()> {
 
 fn check_toolchain() -> Vec<Check> {
     let mut out = Vec::new();
+    // 必装 (用户直接调或 frank install 后续 cargo build 等可能需要)
     for (name, args) in [("git", &["--version"][..]), ("cargo", &["--version"][..])] {
         let res = Command::new(name).args(args).output();
         match res {
@@ -136,8 +137,34 @@ fn check_toolchain() -> Vec<Check> {
             }
             _ => out.push(Check::warn(
                 format!("toolchain {name}"),
-                "not found in PATH; install.sh 可自动装".to_string(),
+                format!("{name} not in PATH (frank install 用 libgit2 仍 work, 但建议装 `brew install {name}`)"),
             )),
+        }
+    }
+    // 可选 (装上更好, 不装也 fallback)
+    for (name, args, hint) in [
+        (
+            "gh",
+            &["--version"][..],
+            "GitHub CLI — frank market 用它的 token 防 60/h 限速, 装: `brew install gh && gh auth login`",
+        ),
+        (
+            "curl",
+            &["--version"][..],
+            "用于 install.sh / 健康检查 — macOS/linux 一般自带",
+        ),
+    ] {
+        let res = Command::new(name).args(args).output();
+        match res {
+            Ok(o) if o.status.success() => {
+                let v = String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("(no output)")
+                    .to_string();
+                out.push(Check::ok(format!("optional {name}"), v));
+            }
+            _ => out.push(Check::warn(format!("optional {name}"), hint.to_string())),
         }
     }
     out

@@ -52,17 +52,16 @@ pub fn run(args: Args) -> Result<()> {
     })
 }
 
-/// 构造 GitHub API client — 自动从 env `GITHUB_TOKEN` / `GH_TOKEN` 注入 Bearer auth.
-/// 无 token 时仍能跑但 60req/h 限速.
+/// 构造 GitHub API client. token 来源优先级:
+/// 1. env `GITHUB_TOKEN`
+/// 2. env `GH_TOKEN`
+/// 3. `gh auth token` subprocess (用户装了 gh + 登录过)
+/// 4. 无 token (60req/h 限速, 一般够 sync 一次)
 fn github_client() -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .user_agent("frank-cli/market-sync");
-    if let Some(token) = std::env::var("GITHUB_TOKEN")
-        .or_else(|_| std::env::var("GH_TOKEN"))
-        .ok()
-        .filter(|t| !t.trim().is_empty())
-    {
+    if let Some(token) = find_github_token() {
         let mut headers = reqwest::header::HeaderMap::new();
         if let Ok(val) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
             headers.insert(reqwest::header::AUTHORIZATION, val);
@@ -70,6 +69,29 @@ fn github_client() -> Result<reqwest::Client> {
         }
     }
     builder.build().context("build reqwest client")
+}
+
+fn find_github_token() -> Option<String> {
+    if let Ok(t) = std::env::var("GITHUB_TOKEN") {
+        if !t.trim().is_empty() {
+            return Some(t.trim().to_string());
+        }
+    }
+    if let Ok(t) = std::env::var("GH_TOKEN") {
+        if !t.trim().is_empty() {
+            return Some(t.trim().to_string());
+        }
+    }
+    // 兜底: gh auth token (用户装 gh 登录过的话最稳)
+    if let Ok(out) = std::process::Command::new("gh").args(["auth", "token"]).output() {
+        if out.status.success() {
+            let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !t.is_empty() {
+                return Some(t);
+            }
+        }
+    }
+    None
 }
 
 async fn list_dir_names(client: &reqwest::Client, url: &str) -> Result<Vec<String>> {
