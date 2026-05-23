@@ -85,6 +85,9 @@
     <select id="model">
       <option value="">(空 = 用 CLI 自家默认)</option>
     </select>
+    <input id="model-input" type="text" placeholder="或手输 model 名 (留空走 CLI 默认)"
+           style="margin-top:4px;display:none">
+    </input>
     <label>Prompt</label>
     <textarea id="prompt" placeholder="给 AI 的指令&#10;例: 用一句话告诉我你是什么模型"></textarea>
     <label>Timeout (秒, 默认 300)</label>
@@ -187,7 +190,8 @@ async function submitJob() {
       prompt: document.getElementById('prompt').value,
       timeout: parseInt(document.getElementById('timeout').value, 10),
     };
-    const model = document.getElementById('model').value;
+    const model = document.getElementById('model').value
+                 || document.getElementById('model-input').value.trim();
     if (model) body.model = model;
     const resp = await fetch('/jobs', {
       method: 'POST',
@@ -245,13 +249,17 @@ async function loadProviders() {
 function onProviderChange() {
   const name = document.getElementById('provider').value;
   const sel = document.getElementById('model');
+  const input = document.getElementById('model-input');
   sel.innerHTML = '<option value="">(空 = 用 CLI 自家默认)</option>';
+  input.style.display = 'none';
+  input.value = '';
   const p = PROVIDERS.find(x => x.name === name);
   if (!p || p.models.length === 0) {
-    document.getElementById('model-hint').textContent = '(本机未发现 model, 用默认)';
+    document.getElementById('model-hint').textContent = '(无本地 model 清单, 留空用默认 或手输)';
+    input.style.display = 'block';
     return;
   }
-  document.getElementById('model-hint').textContent = `本机 ${p.models.length} 个 model`;
+  document.getElementById('model-hint').textContent = `${p.models.length} 个本地候选`;
   for (const m of p.models) {
     const opt = document.createElement('option');
     opt.value = m;

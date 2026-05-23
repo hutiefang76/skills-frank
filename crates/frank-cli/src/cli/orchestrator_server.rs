@@ -167,7 +167,7 @@ async fn list_providers() -> Json<Vec<ProviderInfo>> {
     for name in names {
         let available = which::which(name).is_ok();
         let models = if available {
-            detect_models(name).await
+            detect_models(name)
         } else {
             Vec::new()
         };
@@ -180,21 +180,29 @@ async fn list_providers() -> Json<Vec<ProviderInfo>> {
     Json(out)
 }
 
-/// 每家 CLI 自家的 model 列表来源 — 全部走本机数据, 不调外网。
-async fn detect_models(provider: &str) -> Vec<String> {
+/// 每家 CLI 的 model 列表来源 — **只读本机文件 / 硬编码 alias, 不 spawn 任何子进程**。
+///
+/// 之前版本跑 `opencode models` 子进程, opencode 初始化时扫照片/音乐库/网络宗卷,
+/// macOS TCC 弹一堆 "frank 想访问 ..." 权限对话框 + daemon 卡死. 用户原话:
+/// "你干嘛了又在要访问权限?"
+///
+/// 现在所有 4 家全部 zero-IO 路径:
+fn detect_models(provider: &str) -> Vec<String> {
     match provider {
-        // Anthropic 标准 alias (`claude --help` 文档: "alias 'sonnet' or 'opus'")
+        // Anthropic 文档标准 alias (`claude --help`: "alias 'sonnet' or 'opus'")
         "claude" => vec!["opus".into(), "sonnet".into(), "haiku".into()],
-        // codex 用户本机 ~/.codex/models_cache.json (登录后 codex CLI 自己刷的)
+        // codex 自家 cache 文件 (用户跑 codex login 后 CLI 写的, frank 只读)
         "codex" => read_codex_models(),
-        // opencode: subprocess `opencode models` 一行一个
-        "opencode" => list_opencode_models().await,
-        // gemini CLI 没列模型命令, 用 Google 公开 alias
+        // gemini CLI 没列模型命令, Google 公开 alias
         "gemini" => vec![
             "gemini-2.5-pro".into(),
             "gemini-2.5-flash".into(),
             "gemini-2.0-flash".into(),
         ],
+        // opencode 没有本地 model cache 文件, 也不能 spawn `opencode models` (会触发 TCC).
+        // 返回空 → UI 提示"用 CLI 默认 model 或手输 model 名".
+        // 用户跑 `opencode models` 看 model 名 (在自己终端, 跟 daemon 隔离).
+        // _ 分支 fallthrough: opencode + 其他未识别 provider 都给空, 用户手输.
         _ => Vec::new(),
     }
 }
@@ -219,24 +227,6 @@ fn read_codex_models() -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-async fn list_opencode_models() -> Vec<String> {
-    let out = tokio::process::Command::new("opencode")
-        .arg("models")
-        .output()
-        .await
-        .ok();
-    let Some(out) = out else { return Vec::new() };
-    if !out.status.success() {
-        return Vec::new();
-    }
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .map(String::from)
-        .collect()
 }
 
 async fn list_jobs(State(s): State<AppState>) -> Json<Vec<JobSummary>> {
