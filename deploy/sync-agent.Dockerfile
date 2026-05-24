@@ -22,7 +22,10 @@
 # rust:1-slim (latest stable) — 注: Cargo.lock 里某些 transitive deps (idna_adapter 1.2+) 需
 # edition 2024, 这在 cargo 1.85+ (rust 1.85+) 才稳定. workspace 声明的 rust-version = 1.75
 # 只是 MSRV 提示, 构建用 newer cargo 完全兼容.
-FROM rust:1-slim-bookworm AS builder
+FROM rust:1-slim-trixie AS builder
+# v0.8.1: bookworm(glibc 2.36) → trixie(glibc 2.41)
+# onnxruntime 5.x prebuilt (fastembed dep) 引用 __isoc23_strtoull (ISO C 2023),
+# 需 glibc 2.38+. 不升 base 直接 rust-lld 报 undefined symbol 链接失败.
 
 # v0.8: deb.debian.org 走 fastly CDN, 跨平台 emulation 下比阿里云稳定
 # (实测阿里云在 buildx --platform 模拟下偶尔 connection failed)
@@ -68,7 +71,9 @@ COPY crates ./crates
 RUN cargo build --release -p frank-sync-agent --locked
 
 # ---- stage 2: runtime ----
-FROM debian:12-slim AS runtime
+FROM debian:trixie-slim AS runtime
+# v0.8.1: 同 builder, runtime 用 trixie 才能 dynamic link 到 glibc 2.41+
+# (binary 在 builder 上链接 isoc23 符号, runtime 必须有对应 glibc 版本)
 
 # 切换到阿里云镜像 (同 builder stage 原因)
 RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
