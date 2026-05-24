@@ -18,6 +18,7 @@ use clap::{Parser, Subcommand};
 pub mod ai;
 pub mod cache;
 pub mod config;
+pub mod ui;
 pub mod update;
 pub mod daemon;
 pub mod dedupe;
@@ -121,6 +122,9 @@ enum Commands {
     /// Cache 管理 (`frank cache list / clear [name]` — 看/清 ~/.frank/cache/)。
     Cache(cache::Args),
 
+    /// 一次性 Web UI (`frank ui` — 临时起 axum + open browser + Ctrl-C 退, 不留 daemon, 不弹 TCC)。
+    Ui(ui::Args),
+
     /// 移除已配 token (~/.frank/.token)。
     Logout,
 
@@ -165,6 +169,7 @@ pub fn run() -> Result<()> {
         Commands::Config(args) => config::run(args),
         Commands::Market(args) => market::run(args),
         Commands::Cache(args) => cache::run(args),
+        Commands::Ui(args) => ui::run(args),
         Commands::Logout => login::run(login::Args {
             command: Some(login::LoginCommand::Logout),
             token: None,
