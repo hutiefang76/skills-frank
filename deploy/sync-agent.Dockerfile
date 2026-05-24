@@ -89,11 +89,13 @@ RUN apt-get update \
 # 二进制放到 PATH; debian:trixie-slim 自带 nobody:65534
 COPY --from=builder /workspace/target/release/frank-sync-agent /usr/local/bin/frank-sync-agent
 
-# v0.8.1: fastembed-rs v5+ 默认 cache 在 `$PWD/local_cache/` (不是 ~/.cache!).
-# nobody 默认 WORKDIR=/, 写不了 /local_cache. 把 WORKDIR + HOME 都指到 nobody 拥有的目录.
-RUN mkdir -p /home/nobody/.cache/fastembed /home/nobody/.cache/huggingface \
-    && chown -R nobody:nogroup /home/nobody
+# v0.8.1: fastembed cache 路径走显式 FASTEMBED_CACHE_DIR env, 不依赖 PWD/HOME.
+# 模型在 GH Actions runner 预下载好 (国外 runner 通 HuggingFace), COPY 进镜像 →
+# runtime 不联网, 绕开 tx 在国内连 HF 不稳的问题 (hf-mirror.com 缺 Content-Range).
+RUN mkdir -p /home/nobody/.cache/huggingface && chown -R nobody:nogroup /home/nobody
+COPY --chown=nobody:nogroup hf-cache/ /home/nobody/.cache/huggingface/
 ENV HOME=/home/nobody
+ENV FASTEMBED_CACHE_DIR=/home/nobody/.cache/huggingface
 WORKDIR /home/nobody
 
 # 服务在 0.0.0.0:3000 监听 (FRANK_BIND_ADDR 默认值);
