@@ -173,6 +173,36 @@ pub fn frank_cli_in_path() -> bool {
     which::which("frank").is_ok()
 }
 
+impl Recommendation {
+    /// 一行总结 (doctor 表格末行 + summary 用)。
+    #[must_use]
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::NoChange => "无 official memory MCP 冲突, frank CLI 已接管",
+            Self::DisableOfficial => "建议禁用 official memory MCP, 让 frank-memory 接管",
+            Self::InstallFrank => "未装 frank, 也无 memory MCP — 建议 `brew install frank` 启用统一记忆库",
+            Self::KeepBoth => "official memory MCP 已装, 无 frank CLI; 保持现状 (装 frank 再来 doctor 看建议)",
+        }
+    }
+
+    /// 针对单个 provider 给禁用 official MCP 的具体命令 (DisableOfficial 时用)。
+    #[must_use]
+    pub fn disable_hint(provider: Provider, entry_name: &str) -> String {
+        match provider {
+            Provider::Claude => format!("claude mcp remove {entry_name} --scope user"),
+            Provider::Codex => format!(
+                "编辑 ~/.codex/config.toml 把 [mcp_servers.{entry_name}] 块加 enabled = false"
+            ),
+            Provider::Gemini => {
+                format!("编辑 ~/.gemini/settings.json 删除 mcpServers.{entry_name} 条目")
+            }
+            Provider::Opencode => format!(
+                "编辑 ~/.config/opencode/opencode.json 把 mcp.{entry_name} 的 enabled 改 false"
+            ),
+        }
+    }
+}
+
 /// 把 npx/uvx args 数组中是否包含 `@modelcontextprotocol/server-memory` 或
 /// `mcp-server-memory` 一律判为 official memory MCP。
 ///
@@ -195,6 +225,34 @@ pub(super) fn is_official_combined(command: &[String]) -> bool {
     };
     let tail: Vec<String> = command.iter().skip(1).cloned().collect();
     is_official(head, &tail)
+}
+
+/// Phase 4 v0.12 占位 — `frank-mcp` 本机 binary 或 `frank.hutiefang.com` 远程。
+///
+/// 取 `command` 的 basename (路径最后一段, 去 .exe 后缀), 比对 `frank-mcp`。
+/// 远程模式: `url` host 后缀 `frank.hutiefang.com` (兼容 `https://api.frank.hutiefang.com/mcp`)。
+///
+/// 当前 4 个 reader 都还没调它 (Phase 4 才装 frank-mcp), 写这里给后续连接。
+#[must_use]
+pub fn detect_frank_mcp(command: &str, url: Option<&str>) -> Option<FrankMcp> {
+    let basename = std::path::Path::new(command)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(command);
+    if basename == "frank-mcp" {
+        return Some(FrankMcp {
+            mode: FrankMcpMode::Stdio,
+        });
+    }
+    if let Some(u) = url {
+        // 极简 host 匹配 — 用 url crate 太重, 这里只看 host 后缀
+        if u.contains("frank.hutiefang.com") {
+            return Some(FrankMcp {
+                mode: FrankMcpMode::Remote,
+            });
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -310,5 +368,51 @@ mod tests {
         // 调真实 inspect_all(); 即使没装任何 provider, 也应返回 4 条 (官方/frank 都 None)
         let res = inspect_all();
         assert_eq!(res.len(), 4);
+    }
+
+    // ─── Phase 4 占位 frank_mcp 探测 ───────────────────────────────────────
+
+    #[test]
+    fn detect_frank_mcp_stdio_basename() {
+        let res = detect_frank_mcp("/usr/local/bin/frank-mcp", None).expect("should detect");
+        assert_eq!(res.mode, FrankMcpMode::Stdio);
+    }
+
+    #[test]
+    fn detect_frank_mcp_remote_url() {
+        let res = detect_frank_mcp("npx", Some("https://api.frank.hutiefang.com/mcp"))
+            .expect("should detect");
+        assert_eq!(res.mode, FrankMcpMode::Remote);
+    }
+
+    #[test]
+    fn detect_frank_mcp_negative_other_binary() {
+        assert!(detect_frank_mcp("/usr/bin/something-else", None).is_none());
+    }
+
+    // ─── Recommendation summary + disable_hint ────────────────────────────
+
+    #[test]
+    fn recommendation_summary_all_variants_have_text() {
+        for r in [
+            Recommendation::NoChange,
+            Recommendation::DisableOfficial,
+            Recommendation::InstallFrank,
+            Recommendation::KeepBoth,
+        ] {
+            assert!(!r.summary().is_empty());
+        }
+    }
+
+    #[test]
+    fn disable_hint_for_each_provider() {
+        let h = Recommendation::disable_hint(Provider::Claude, "memory");
+        assert!(h.contains("claude mcp remove memory"));
+        let h = Recommendation::disable_hint(Provider::Codex, "memory");
+        assert!(h.contains("config.toml"));
+        let h = Recommendation::disable_hint(Provider::Gemini, "memory");
+        assert!(h.contains("settings.json"));
+        let h = Recommendation::disable_hint(Provider::Opencode, "memory");
+        assert!(h.contains("opencode.json"));
     }
 }
