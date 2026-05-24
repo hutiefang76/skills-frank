@@ -29,7 +29,7 @@ use anyhow::Result;
 use axum::extract::{ws::WebSocketUpgrade, Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
-use axum::routing::get;
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use frank_orchestrator::worker::local::{CliProvider, LocalCliWorker};
@@ -127,6 +127,11 @@ pub async fn serve(addr: SocketAddr) -> Result<()> {
         .route("/jobs", get(list_jobs).post(submit_job))
         .route("/jobs/:id", get(get_job))
         .route("/jobs/:id/stream", get(ws_stream))
+        // v0.10.0: Skill 管理 REST (复用 frank-cli library 模块)
+        .route("/api/skills", get(api_list_skills).post(api_install_skill))
+        .route("/api/skills/:name", delete(api_uninstall_skill))
+        .route("/api/skills/:name/enable", post(api_enable_skill))
+        .route("/api/skills/:name/disable", post(api_disable_skill))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -426,3 +431,173 @@ fn parse_provider(s: &str) -> anyhow::Result<CliProvider> {
 
 // 给 futures_util::StreamExt::split 用
 use futures_util::stream::StreamExt;
+
+// ============================================================
+// v0.10.0: Web UI Skill 管理 REST handlers
+// ============================================================
+//
+// 设计:
+// - 全部走 spawn_blocking (frank-cli 同步 API 不是 async)
+// - 失败 → 400 + JSON { ok: false, error: "..." }
+// - 成功 → 200 + JSON { ok: true, ... }
+
+#[derive(Serialize)]
+struct SkillRow {
+    name: String,
+    visibility: String,
+    source_ref: String,
+    enabled: bool,
+    platforms: Vec<String>,
+    installed: bool,
+}
+
+#[derive(Serialize)]
+struct OkResp {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct InstallReq {
+    /// skill name (走 manifest) 或者 url 模式时为空
+    #[serde(default)]
+    name: Option<String>,
+    /// 任意 git url (走 install --url 模式)
+    #[serde(default)]
+    url: Option<String>,
+    /// git ref (默认 main)
+    #[serde(default)]
+    r#ref: Option<String>,
+    /// 已装也强行覆盖
+    #[serde(default)]
+    force: bool,
+    /// 升级 (保留 installed_at)
+    #[serde(default)]
+    upgrade: bool,
+}
+
+/// `GET /api/skills` — 列 manifest skills + state.json 真装状态。
+async fn api_list_skills() -> Result<Json<Vec<SkillRow>>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(|| -> anyhow::Result<Vec<SkillRow>> {
+        let manifests = crate::manifest::parser::discover()?;
+        let skills = crate::manifest::parser::merge(manifests);
+        let state = crate::state::State::load_default().unwrap_or_else(|_| {
+            // load fail → fake empty state, list 不至于挂
+            crate::state::State::load(std::path::PathBuf::from("/dev/null")).unwrap()
+        });
+        Ok(skills
+            .iter()
+            .map(|s| {
+                let installed = state.get(&s.name).is_some();
+                let (sref, plats, enabled) = state.get(&s.name).map_or(
+                    (String::new(), Vec::new(), false),
+                    |st| {
+                        (
+                            st.source_ref.chars().take(7).collect::<String>(),
+                            st.platforms.iter().map(|p| format!("{p:?}")).collect(),
+                            st.enabled,
+                        )
+                    },
+                );
+                SkillRow {
+                    name: s.name.clone(),
+                    visibility: format!("{:?}", s.visibility),
+                    source_ref: sref,
+                    enabled,
+                    platforms: plats,
+                    installed,
+                }
+            })
+            .collect())
+    })
+    .await
+    .map_err(internal_err)?
+    .map(Json)
+    .map_err(handler_err)
+}
+
+/// `POST /api/skills` — 装 skill (body: { name, url?, ref?, force?, upgrade? })。
+async fn api_install_skill(
+    Json(req): Json<InstallReq>,
+) -> Result<Json<OkResp>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        crate::cli::install::run(crate::cli::install::Args {
+            name: req.name,
+            all: false,
+            profile: None,
+            skip_health_check: false,
+            force: req.force,
+            upgrade: req.upgrade,
+            url: req.url,
+            r#ref: req.r#ref,
+        })
+    })
+    .await
+    .map_err(internal_err)?
+    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map_err(handler_err)
+}
+
+/// `DELETE /api/skills/:name` — 单卸一个 skill。
+async fn api_uninstall_skill(
+    Path(name): Path<String>,
+) -> Result<Json<OkResp>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        crate::cli::uninstall::run(crate::cli::uninstall::Args {
+            name: Some(name),
+            including_3rd_party: false,
+            keep_cache: false,
+        })
+    })
+    .await
+    .map_err(internal_err)?
+    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map_err(handler_err)
+}
+
+/// `POST /api/skills/:name/enable` — 重建链接。
+async fn api_enable_skill(
+    Path(name): Path<String>,
+) -> Result<Json<OkResp>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        crate::cli::enable::run(crate::cli::enable::Args { name })
+    })
+    .await
+    .map_err(internal_err)?
+    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map_err(handler_err)
+}
+
+/// `POST /api/skills/:name/disable` — 移链接但保留 state。
+async fn api_disable_skill(
+    Path(name): Path<String>,
+) -> Result<Json<OkResp>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        crate::cli::disable::run(crate::cli::disable::Args { name })
+    })
+    .await
+    .map_err(internal_err)?
+    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map_err(handler_err)
+}
+
+fn internal_err(e: tokio::task::JoinError) -> (StatusCode, Json<OkResp>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(OkResp {
+            ok: false,
+            error: Some(format!("task join: {e}")),
+        }),
+    )
+}
+
+fn handler_err(e: anyhow::Error) -> (StatusCode, Json<OkResp>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(OkResp {
+            ok: false,
+            error: Some(format!("{e:#}")),
+        }),
+    )
+}
