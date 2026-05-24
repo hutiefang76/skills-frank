@@ -56,8 +56,15 @@ pub struct Args {
     /// `frank install --url https://github.com/foo/bar.git`
     /// 自动用 repo 名 (bar) 作 skill name, visibility=community.
     /// 含 subpath 用 `#subpath` 后缀: `--url https://.../repo.git#path/to/skill`.
+    /// 含 branch 用 `?ref=xxx` query: `--url https://.../repo.git?ref=master`
+    /// (跟 `--ref` flag 二选一; flag 优先).
     #[arg(long, value_name = "GIT_URL")]
     pub url: Option<String>,
+
+    /// v0.9: 显式指定 git ref (branch/tag/sha) — 给 `--url` 配的, 不传默认 `main`.
+    /// 修 v0.7 hardcoded main 的 bug (default-master 仓库装失败如 skills-nacos-ops).
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
 }
 
 /// 执行 install 命令。
@@ -75,7 +82,7 @@ pub fn run(args: Args) -> Result<()> {
     // v0.7: --url 模式直接 synthesize Skill, 跳过 manifest 查找.
     let (name, skill_owned, skill_ref): (String, Option<crate::manifest::schema::Skill>, _);
     if let Some(url) = args.url.as_ref() {
-        let s = synthesize_skill_from_url(url, args.name.as_deref())?;
+        let s = synthesize_skill_from_url(url, args.name.as_deref(), args.r#ref.as_deref())?;
         name = s.name.clone();
         crate::log::ui::info(&format!(
             "--url 模式: 装 `{}` 从 {} (visibility=community)",
@@ -220,16 +227,37 @@ fn preflight_external_check(name: &str, force: bool) -> Result<()> {
 
 /// `frank install --url <git>` 时把 URL 解析成临时 Skill struct (不写 manifest).
 ///
-/// - URL 例 `https://github.com/foo/bar.git` → name="bar", subpath=None
+/// - URL 例 `https://github.com/foo/bar.git` → name="bar", subpath=None, ref="main"
 /// - URL 例 `https://github.com/foo/bar.git#path/to/skill` → name="skill" (subpath 最后一段), subpath="path/to/skill"
+/// - URL 例 `https://github.com/foo/bar.git?ref=master` → ref="master"  (v0.9)
+/// - URL 例 `https://github.com/foo/bar.git?ref=master#path/to/skill` → 两者结合
+/// - `override_ref` (来自 `--ref` flag) 优先于 URL query string. 都没则 `"main"`.
 /// - 用户传 `name` 参数时覆盖自动推导的 name (`frank install --url ... my-name`)
 /// - visibility 默认 community (用户开源 — 不算 frank-official 也不算 user-private)
-fn synthesize_skill_from_url(url: &str, override_name: Option<&str>) -> Result<Skill> {
-    let (clean_url, subpath) = if let Some((u, p)) = url.split_once('#') {
-        (u.to_string(), Some(p.to_string()))
-    } else {
-        (url.to_string(), None)
-    };
+fn synthesize_skill_from_url(
+    url: &str,
+    override_name: Option<&str>,
+    override_ref: Option<&str>,
+) -> Result<Skill> {
+    // 先剥 #subpath, 再剥 ?ref=xxx — fragment 永远在 query 后
+    let (url_no_frag, subpath) = url
+        .split_once('#')
+        .map_or((url.to_string(), None), |(u, p)| {
+            (u.to_string(), Some(p.to_string()))
+        });
+    let (clean_url, ref_from_query) = url_no_frag
+        .split_once('?')
+        .map_or((url_no_frag.clone(), None), |(u, q)| {
+            // 简单 query parse, 只认 ref=xxx (其它 query 暂时丢)
+            let r = q.split('&').find_map(|kv| {
+                kv.strip_prefix("ref=").map(String::from)
+            });
+            (u.to_string(), r)
+        });
+    let git_ref = override_ref
+        .map(String::from)
+        .or(ref_from_query)
+        .unwrap_or_else(|| "main".to_string());
     // 推导 name: subpath 最后一段, 没就 url repo 名 (去掉 .git)
     let auto_name = subpath
         .as_deref()
@@ -252,7 +280,7 @@ fn synthesize_skill_from_url(url: &str, override_name: Option<&str>) -> Result<S
         description: format!("Ad-hoc install via --url {url}"),
         source: Source::Git {
             url: clean_url,
-            r#ref: "main".to_string(),
+            r#ref: git_ref,
             subpath,
         },
         visibility: Visibility::Community,
@@ -270,4 +298,98 @@ fn synthesize_skill_from_url(url: &str, override_name: Option<&str>) -> Result<S
         mcp_server: None,
         metadata: std::collections::HashMap::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manifest::schema::Source;
+
+    fn extract_ref_and_subpath(s: &Skill) -> (String, Option<String>) {
+        let Source::Git { r#ref, subpath, .. } = &s.source else {
+            panic!("expected Source::Git")
+        };
+        (r#ref.clone(), subpath.clone())
+    }
+
+    #[test]
+    fn url_default_ref_is_main() {
+        let s =
+            synthesize_skill_from_url("https://github.com/foo/bar.git", None, None).unwrap();
+        let (r, sp) = extract_ref_and_subpath(&s);
+        assert_eq!(r, "main");
+        assert_eq!(sp, None);
+        assert_eq!(s.name, "bar");
+    }
+
+    #[test]
+    fn flag_ref_overrides_default() {
+        let s = synthesize_skill_from_url(
+            "https://github.com/foo/bar.git",
+            None,
+            Some("master"),
+        )
+        .unwrap();
+        assert_eq!(extract_ref_and_subpath(&s).0, "master");
+    }
+
+    #[test]
+    fn url_query_ref_parsed() {
+        let s = synthesize_skill_from_url(
+            "https://github.com/foo/bar.git?ref=dev",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(extract_ref_and_subpath(&s).0, "dev");
+    }
+
+    #[test]
+    fn flag_ref_wins_over_query_ref() {
+        let s = synthesize_skill_from_url(
+            "https://github.com/foo/bar.git?ref=dev",
+            None,
+            Some("prod"),
+        )
+        .unwrap();
+        assert_eq!(extract_ref_and_subpath(&s).0, "prod");
+    }
+
+    #[test]
+    fn url_subpath_fragment_still_works() {
+        let s = synthesize_skill_from_url(
+            "https://github.com/foo/bar.git#sub/path",
+            None,
+            None,
+        )
+        .unwrap();
+        let (r, sp) = extract_ref_and_subpath(&s);
+        assert_eq!(r, "main");
+        assert_eq!(sp.as_deref(), Some("sub/path"));
+        assert_eq!(s.name, "path"); // 最后一段
+    }
+
+    #[test]
+    fn url_query_plus_subpath_fragment_combined() {
+        let s = synthesize_skill_from_url(
+            "https://github.com/foo/bar.git?ref=master#some/sub",
+            None,
+            None,
+        )
+        .unwrap();
+        let (r, sp) = extract_ref_and_subpath(&s);
+        assert_eq!(r, "master");
+        assert_eq!(sp.as_deref(), Some("some/sub"));
+    }
+
+    #[test]
+    fn override_name_wins() {
+        let s = synthesize_skill_from_url(
+            "https://github.com/foo/bar.git",
+            Some("my-alias"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(s.name, "my-alias");
+    }
 }

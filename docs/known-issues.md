@@ -39,7 +39,7 @@ FRANK_SYNC_AGENT_URL=http://localhost:3000 frank memory search "..." --user me
 
 ---
 
-## 2026-05-23 · `frank install --url <git>` 硬编码 ref=main, 默认 master 仓库失败
+## 2026-05-23 · [已修 v0.9.0] `frank install --url <git>` 硬编码 ref=main, 默认 master 仓库失败
 
 **问题**: `crates/frank-cli/src/cli/install.rs::synthesize_skill_from_url` 把 git ref 硬编码为 `"main"`。如果目标仓库默认分支是 `master` (或其他), libgit2 fetch `main` 不存在的 ref 会失败:
 ```
@@ -56,12 +56,22 @@ corrupted loose reference file: FETCH_HEAD; class=Reference (4)
 - 改本机 binary: 手动 patch install.rs `r#ref: "main"` 改 `"master"` 后重 cargo build
 
 **计划修复** (v0.8):
-- 选项 A: URL fragment 支持: `--url https://.../foo.git#master` 解析出 ref (跟现有 `#subpath` 一致)
+- ~~选项 A: URL fragment 支持~~
 - 选项 B: 加 `--ref <ref>` flag: `--url https://.../foo.git --ref master`
 - 选项 C: 失败后 fallback 试 `master`: 不优, 静默 fallback 容易掩盖错配
-- 推荐 A+B 都做: A 简洁, B 显式
+- 实际 v0.9.0 选 **B + URL query string `?ref=xxx`** 双语法 (fragment 留给 #subpath 保持兼容)
 
 **根因**: P0 day 3-4 实现 `--url` 时只考虑 GitHub 默认 main 仓库, 没考虑老仓库默认 master。
+
+**v0.9.0 修复实测**:
+```
+frank install --url https://github.com/hutiefang76/skills-nacos-ops.git --ref master test-nacos
+# → ✓ `test-nacos` installed (2 platforms, 1.5s) — sha c414605
+```
+等价 query 语法:
+```
+frank install --url 'https://github.com/hutiefang76/skills-nacos-ops.git?ref=master' test-nacos
+```
 
 ---
 
