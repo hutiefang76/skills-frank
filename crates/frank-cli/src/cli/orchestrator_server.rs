@@ -132,6 +132,11 @@ pub async fn serve(addr: SocketAddr) -> Result<()> {
         .route("/api/skills/:name", delete(api_uninstall_skill))
         .route("/api/skills/:name/enable", post(api_enable_skill))
         .route("/api/skills/:name/disable", post(api_disable_skill))
+        // v0.10.3: Memory 浏览 REST (复用 sync_client → sync-agent)
+        .route("/api/memory/list", post(api_memory_list))
+        .route("/api/memory/search", post(api_memory_search))
+        .route("/api/memory/add_raw", post(api_memory_add_raw))
+        .route("/api/memory/:id", delete(api_memory_delete))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -575,6 +580,121 @@ async fn api_disable_skill(
 ) -> Result<Json<OkResp>, (StatusCode, Json<OkResp>)> {
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         crate::cli::disable::run(crate::cli::disable::Args { name })
+    })
+    .await
+    .map_err(internal_err)?
+    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map_err(handler_err)
+}
+
+// ============================================================
+// v0.10.3: Memory 浏览 REST handlers
+// ============================================================
+
+#[derive(Deserialize)]
+struct MemListReq {
+    #[serde(default)]
+    user: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default = "default_mem_limit")]
+    limit: u64,
+}
+fn default_mem_limit() -> u64 { 50 }
+
+#[derive(Deserialize)]
+struct MemSearchReq {
+    query: String,
+    #[serde(default)]
+    user: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default = "default_mem_limit")]
+    limit: u64,
+    #[serde(default)]
+    score_threshold: Option<f32>,
+}
+
+#[derive(Deserialize)]
+struct MemAddRawReq {
+    fact: String,
+    #[serde(default)]
+    user: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    session: Option<String>,
+}
+
+fn scope_from(user: Option<String>, agent: Option<String>, session: Option<String>) -> frank_memory::Scope {
+    frank_memory::Scope {
+        user_id: user,
+        agent_id: agent,
+        session_id: session,
+    }
+}
+
+/// `POST /api/memory/list` body: { user?, agent?, session?, limit }
+async fn api_memory_list(
+    Json(req): Json<MemListReq>,
+) -> Result<Json<Vec<frank_memory::MemoryRecord>>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<frank_memory::MemoryRecord>> {
+        let client = crate::sync_client::SyncClient::from_env_or_config()?;
+        let scope = scope_from(req.user, req.agent, req.session);
+        client.list(&scope, req.limit)
+    })
+    .await
+    .map_err(internal_err)?
+    .map(Json)
+    .map_err(handler_err)
+}
+
+/// `POST /api/memory/search` body: { query, user?, agent?, session?, limit?, score_threshold? }
+async fn api_memory_search(
+    Json(req): Json<MemSearchReq>,
+) -> Result<Json<Vec<frank_memory::MemoryMatch>>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<frank_memory::MemoryMatch>> {
+        let client = crate::sync_client::SyncClient::from_env_or_config()?;
+        let scope = scope_from(req.user, req.agent, req.session);
+        client.search(&req.query, &scope, Some(req.limit), req.score_threshold)
+    })
+    .await
+    .map_err(internal_err)?
+    .map(Json)
+    .map_err(handler_err)
+}
+
+/// `POST /api/memory/add_raw` body: { fact, user?, agent?, session? }
+async fn api_memory_add_raw(
+    Json(req): Json<MemAddRawReq>,
+) -> Result<Json<OkResp>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let client = crate::sync_client::SyncClient::from_env_or_config()?;
+        let scope = scope_from(req.user, req.agent, req.session);
+        client.add_raw(&req.fact, &scope, None)?;
+        Ok(())
+    })
+    .await
+    .map_err(internal_err)?
+    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map_err(handler_err)
+}
+
+/// `DELETE /api/memory/:id` — 单删 record
+async fn api_memory_delete(
+    Path(id_str): Path<String>,
+) -> Result<Json<OkResp>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let client = crate::sync_client::SyncClient::from_env_or_config()?;
+        // MemoryId 是 uuid::Uuid 包装, 走 serde 反序列化
+        let quoted = serde_json::to_string(&id_str).expect("string always serializable");
+        let id: frank_memory::MemoryId = serde_json::from_str(&quoted)
+            .map_err(|e| anyhow::anyhow!("invalid memory id `{id_str}`: {e}"))?;
+        client.delete(&id)
     })
     .await
     .map_err(internal_err)?

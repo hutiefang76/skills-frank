@@ -121,6 +121,7 @@
   <div class="tabs" style="display:inline-flex">
     <div class="tab active" id="tab-jobs" onclick="switchView('jobs')">▶ Jobs</div>
     <div class="tab" id="tab-skills" onclick="switchView('skills')">📦 Skills</div>
+    <div class="tab" id="tab-memory" onclick="switchView('memory')">🧠 Memory</div>
   </div>
 </header>
 <main>
@@ -197,6 +198,60 @@
 </div><!-- /#view-skills -->
 
 <div id="skills-toast"></div>
+
+<div id="view-memory" style="display:none;height:100%;padding:20px;overflow-y:auto">
+  <h2 style="font-size:15px;color:#bbb;margin:0 0 12px">🧠 分布式 Memory <small style="color:#666;font-weight:normal" id="memory-counter"></small></h2>
+
+  <div id="memory-toolbar" style="background:#222;padding:14px;border-radius:6px;border:1px solid #3a3a3a;margin-bottom:20px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto auto;gap:8px;align-items:end">
+      <div>
+        <label style="display:block;font-size:11px;color:#999;margin-bottom:4px">User scope</label>
+        <input id="mem-user" type="text" placeholder="(空 = 全部)" style="width:100%;padding:6px 8px;background:#1a1a1a;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:3px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:#999;margin-bottom:4px">Agent scope</label>
+        <input id="mem-agent" type="text" placeholder="claude / codex / ..." style="width:100%;padding:6px 8px;background:#1a1a1a;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:3px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:#999;margin-bottom:4px">Session scope</label>
+        <input id="mem-session" type="text" placeholder="(空 = 不过滤)" style="width:100%;padding:6px 8px;background:#1a1a1a;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:3px;font-size:13px">
+      </div>
+      <button onclick="loadMemoryList()" style="padding:7px 14px;background:#4a8eff;color:white;border:none;border-radius:3px;cursor:pointer;font-weight:600">📋 List</button>
+      <button onclick="clearMemoryScope()" style="padding:7px 14px;background:#2a2a2a;color:#ccc;border:1px solid #3a3a3a;border-radius:3px;cursor:pointer">清</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-top:12px;padding-top:12px;border-top:1px solid #3a3a3a">
+      <div>
+        <label style="display:block;font-size:11px;color:#999;margin-bottom:4px">语义检索 (semantic search)</label>
+        <input id="mem-query" type="text" placeholder='例: "editor preference" → 召回 "vim/emacs" 记忆' style="width:100%;padding:6px 8px;background:#1a1a1a;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:3px;font-size:13px" onkeydown="if(event.key==='Enter')searchMemory()">
+      </div>
+      <button onclick="searchMemory()" style="padding:7px 14px;background:#16a34a;color:white;border:none;border-radius:3px;cursor:pointer;font-weight:600">🔍 Search</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-top:12px;padding-top:12px;border-top:1px solid #3a3a3a">
+      <div>
+        <label style="display:block;font-size:11px;color:#999;margin-bottom:4px">添加 raw fact (不调 LLM 抽事实)</label>
+        <input id="mem-add-fact" type="text" placeholder='例: "user prefers vim over emacs"' style="width:100%;padding:6px 8px;background:#1a1a1a;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:3px;font-size:13px">
+      </div>
+      <button onclick="addMemoryRaw()" style="padding:7px 14px;background:#d97706;color:white;border:none;border-radius:3px;cursor:pointer;font-weight:600">+ Add Raw</button>
+    </div>
+  </div>
+
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead>
+      <tr>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:90px">Short ID</th>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a">Content</th>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:100px">Score</th>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:140px">Created</th>
+        <th style="padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:60px">Del</th>
+      </tr>
+    </thead>
+    <tbody id="memory-tbody">
+      <tr><td colspan="5" class="empty">点 List 加载, 或 Search 搜索. 需要 frank-sync-agent 在线 + frank login 配 token.</td></tr>
+    </tbody>
+  </table>
+</div><!-- /#view-memory -->
 
 </main>
 
@@ -482,6 +537,142 @@ async function toggleEnable(name, enable) {
     else { toast(`✗ ${data.error}`, true); }
   } catch (e) { toast(`✗ ${e.message}`, true); }
 }
+
+// ============================================================
+// v0.10.3: Memory 浏览
+// ============================================================
+
+function memScopeBody() {
+  const u = document.getElementById('mem-user').value.trim();
+  const a = document.getElementById('mem-agent').value.trim();
+  const s = document.getElementById('mem-session').value.trim();
+  const out = { limit: 50 };
+  if (u) out.user = u;
+  if (a) out.agent = a;
+  if (s) out.session = s;
+  return out;
+}
+
+function clearMemoryScope() {
+  document.getElementById('mem-user').value = '';
+  document.getElementById('mem-agent').value = '';
+  document.getElementById('mem-session').value = '';
+  document.getElementById('mem-query').value = '';
+}
+
+function memTbodyEmpty(msg) {
+  document.getElementById('memory-tbody').innerHTML =
+    `<tr><td colspan="5" class="empty">${escapeHtml(msg)}</td></tr>`;
+  document.getElementById('memory-counter').textContent = '';
+}
+
+function renderMemoryRows(records, withScore) {
+  if (records.length === 0) { memTbodyEmpty('no record'); return; }
+  document.getElementById('memory-counter').textContent = ` (${records.length} 条)`;
+  document.getElementById('memory-tbody').innerHTML = records.map(item => {
+    const r = withScore ? item.record : item;
+    const score = withScore ? `${(item.score * 100).toFixed(1)}%` : '-';
+    const shortId = String(r.id).slice(0, 8);
+    const created = r.created_at ? new Date(r.created_at).toLocaleString() : '-';
+    return `
+      <tr>
+        <td><code style="font-size:11px;color:#888">${escapeHtml(shortId)}…</code></td>
+        <td style="white-space:pre-wrap">${escapeHtml(r.content)}</td>
+        <td><span style="color:#16a34a;font-weight:600">${score}</span></td>
+        <td style="font-size:11px;color:#888">${escapeHtml(created)}</td>
+        <td>
+          <button class="skill-action danger" onclick="deleteMemory('${escapeHtml(r.id)}')">×</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function loadMemoryList() {
+  memTbodyEmpty('加载中…');
+  try {
+    const resp = await fetch('/api/memory/list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(memScopeBody()),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+      memTbodyEmpty(`加载失败: ${data.error || resp.status}`);
+      return;
+    }
+    const records = await resp.json();
+    renderMemoryRows(records, false);
+  } catch (e) { memTbodyEmpty(`加载失败: ${e.message}`); }
+}
+
+async function searchMemory() {
+  const q = document.getElementById('mem-query').value.trim();
+  if (!q) { toast('search 框不能空', true); return; }
+  memTbodyEmpty('搜索中…');
+  try {
+    const body = memScopeBody();
+    body.query = q;
+    const resp = await fetch('/api/memory/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+      memTbodyEmpty(`搜索失败: ${data.error || resp.status}`);
+      return;
+    }
+    const matches = await resp.json();
+    renderMemoryRows(matches, true);
+  } catch (e) { memTbodyEmpty(`搜索失败: ${e.message}`); }
+}
+
+async function addMemoryRaw() {
+  const fact = document.getElementById('mem-add-fact').value.trim();
+  if (!fact) { toast('fact 框不能空', true); return; }
+  try {
+    const body = memScopeBody();
+    body.fact = fact;
+    const resp = await fetch('/api/memory/add_raw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      toast(`✓ 加进去了: ${fact.slice(0, 40)}…`);
+      document.getElementById('mem-add-fact').value = '';
+      loadMemoryList();
+    } else { toast(`✗ ${data.error}`, true); }
+  } catch (e) { toast(`✗ ${e.message}`, true); }
+}
+
+async function deleteMemory(id) {
+  if (!confirm(`真删 ${id.slice(0, 8)}…?`)) return;
+  try {
+    const resp = await fetch(`/api/memory/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (data.ok) { toast(`✓ 删了`); loadMemoryList(); }
+    else { toast(`✗ ${data.error}`, true); }
+  } catch (e) { toast(`✗ ${e.message}`, true); }
+}
+
+// switchView 增加 memory 支持
+const _origSwitchView = switchView;
+switchView = function(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  document.querySelectorAll('#view-jobs, #view-skills, #view-memory').forEach(v => {
+    v.classList.remove('active');
+    v.style.display = 'none';
+  });
+  const view = document.getElementById(`view-${name}`);
+  view.classList.add('active');
+  view.style.display = (name === 'jobs') ? 'grid' : 'block';
+  if (name === 'skills') loadSkills();
+  if (name === 'memory') loadMemoryList();
+};
 </script>
 </body>
 </html>
