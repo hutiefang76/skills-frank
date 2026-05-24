@@ -95,7 +95,9 @@ COPY --from=builder /workspace/target/release/frank-sync-agent /usr/local/bin/fr
 RUN mkdir -p /home/nobody/.cache/huggingface && chown -R nobody:nogroup /home/nobody
 COPY --chown=nobody:nogroup hf-cache/ /home/nobody/.cache/huggingface/
 ENV HOME=/home/nobody
-ENV FASTEMBED_CACHE_DIR=/home/nobody/.cache/huggingface
+ENV FASTEMBED_CACHE_DIR=/home/nobody/.cache/huggingface/hub
+# 注意: hf-cli (python) 写到 $HF_HOME/hub/models--...; 但 hf-hub crate 通过 ApiBuilder.with_cache_dir
+# 直接用 cache_dir/models--... (不加 hub 子目录). 所以这里 FASTEMBED_CACHE_DIR 要带 /hub 后缀对齐 layout.
 WORKDIR /home/nobody
 
 # 服务在 0.0.0.0:3000 监听 (FRANK_BIND_ADDR 默认值);
