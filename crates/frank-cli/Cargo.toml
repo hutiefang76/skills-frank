@@ -70,6 +70,10 @@ reqwest = { version = "0.13", default-features = false, features = [
 # TOML 配置: ~/.frank/config.toml 解析 (memory sync agent URL 等)
 toml = "0.8"
 
+# JSONC 解析: opencode ~/.config/opencode/opencode.json 允许 // 注释 + 尾逗号
+# v0.10.6 P2 D1: mcp_inspect::opencode 读取用
+json5 = "0.4"
+
 # frank-memory 类型复用: Scope / MemoryRecord / MemoryMatch / MemoryId
 # 走 path 依赖, 不上 crates.io
 frank-memory = { path = "../frank-memory" }
