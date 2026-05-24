@@ -45,6 +45,7 @@
 pub mod env;
 pub mod kind;
 pub mod official;
+pub mod pricing;
 pub mod provider;
 pub mod redact;
 pub mod store;
