@@ -89,11 +89,12 @@ RUN apt-get update \
 # 二进制放到 PATH; debian:trixie-slim 自带 nobody:65534
 COPY --from=builder /workspace/target/release/frank-sync-agent /usr/local/bin/frank-sync-agent
 
-# v0.8.1: fastembed cache 在 ~/.cache/fastembed (HOME 决定). nobody 用户默认 HOME=/, 没写权限
-# → 启动报 `Permission denied (os error 13)`. 建 nobody home + 写权限 + ENV HOME 指过去.
+# v0.8.1: fastembed-rs v5+ 默认 cache 在 `$PWD/local_cache/` (不是 ~/.cache!).
+# nobody 默认 WORKDIR=/, 写不了 /local_cache. 把 WORKDIR + HOME 都指到 nobody 拥有的目录.
 RUN mkdir -p /home/nobody/.cache/fastembed /home/nobody/.cache/huggingface \
     && chown -R nobody:nogroup /home/nobody
 ENV HOME=/home/nobody
+WORKDIR /home/nobody
 
 # 服务在 0.0.0.0:3000 监听 (FRANK_BIND_ADDR 默认值);
 # 由 docker-compose expose, 不绑 host port
