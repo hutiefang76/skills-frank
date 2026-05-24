@@ -78,7 +78,10 @@ impl PricingTable {
                     Ok(text) => match serde_json::from_str::<Self>(&text) {
                         Ok(table) => return table,
                         Err(e) => {
-                            tracing::warn!("{} parse failed, fallback bundled: {e}", path.display())
+                            tracing::warn!(
+                                "{} parse failed, fallback bundled: {e}",
+                                path.display()
+                            );
                         }
                     },
                     Err(e) => {

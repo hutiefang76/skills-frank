@@ -48,6 +48,7 @@ pub mod official;
 pub mod pricing;
 pub mod provider;
 pub mod redact;
+pub mod report;
 pub mod store;
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -60,6 +61,7 @@ use serde::{Deserialize, Serialize};
 pub use kind::{ExportStrategy, TokenKind};
 pub use provider::Provider;
 pub use redact::{redact_secrets, RedactWriter};
+pub use report::{CallReport, CallSource, Confidence};
 
 /// 一条凭据 (含 provider / kind / 来源元数据)。
 ///
