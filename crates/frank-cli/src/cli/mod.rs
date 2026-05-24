@@ -16,6 +16,7 @@ use clap::{Parser, Subcommand};
 
 // 各子命令模块声明 (P0 day3-4: install / uninstall / enable / disable / list 已落地)
 pub mod ai;
+pub mod cache;
 pub mod config;
 pub mod daemon;
 pub mod dedupe;
@@ -116,6 +117,9 @@ enum Commands {
     /// 公开市场源 sync (`frank market sync / list` — 拉 modelcontextprotocol/servers + anthropics/skills)。
     Market(market::Args),
 
+    /// Cache 管理 (`frank cache list / clear [name]` — 看/清 ~/.frank/cache/)。
+    Cache(cache::Args),
+
     /// 移除已配 token (~/.frank/.token)。
     Logout,
 
@@ -159,6 +163,7 @@ pub fn run() -> Result<()> {
         Commands::Login(args) => login::run(args),
         Commands::Config(args) => config::run(args),
         Commands::Market(args) => market::run(args),
+        Commands::Cache(args) => cache::run(args),
         Commands::Logout => login::run(login::Args {
             command: Some(login::LoginCommand::Logout),
             token: None,
