@@ -18,6 +18,7 @@ use clap::{Parser, Subcommand};
 pub mod ai;
 pub mod cache;
 pub mod config;
+pub mod update;
 pub mod daemon;
 pub mod dedupe;
 pub mod disable;
@@ -123,9 +124,9 @@ enum Commands {
     /// 移除已配 token (~/.frank/.token)。
     Logout,
 
-    // ----- 以下为占位, P1 实现 -----
-    /// 升级到最新版本 (P1 待实现)。
-    Update,
+    /// 升级 skill: 拉最新 commit (单个或全部 enabled), 复用 `install --upgrade` 路径 (v0.9-3)。
+    Update(update::Args),
+
     /// 回滚到上一个 snapshot (P1 待实现)。
     Rollback,
 }
@@ -170,7 +171,7 @@ pub fn run() -> Result<()> {
             from_host: None,
             show: false,
         }),
-        Commands::Update => stub("update"),
+        Commands::Update(args) => update::run(args),
         Commands::Rollback => stub("rollback"),
     }
 }
