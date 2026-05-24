@@ -18,11 +18,15 @@
 //! `LocalEmbedder` **零依赖外部 service**, **零 token 成本**, 但维度更小 (384 vs 1536),
 //! 质量略低 (BAAI/bge ~ OpenAI text-embedding-3-small 的 85-90%).
 
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use fastembed::{
+    EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles,
+    UserDefinedEmbeddingModel,
+};
 use tokio::sync::Mutex;
 
 use frank_memory::embed::{Embedder, Embedding};
@@ -50,9 +54,53 @@ impl LocalEmbedder {
         Self::with_model(EmbeddingModel::ParaphraseMLMiniLML12V2)
     }
 
-    /// 指定 fastembed 内置模型构造。
+    /// v0.8.1: **完全 offline** 构造 — 从本机文件直接读模型, 不联网, 不 HF.
     ///
-    /// 首次启动会下载 ONNX (几十 MB ~ 几百 MB). HF mirror 配置见 `HF_ENDPOINT` env.
+    /// `dir` 是 hf-cli/python huggingface_hub 风格的 snapshot 目录, 期望布局:
+    /// ```text
+    /// dir/
+    ///   onnx/model.onnx              ← ONNX 模型 (BGE small: ~90 MB)
+    ///   tokenizer.json               ← 必需
+    ///   config.json                  ← 必需
+    ///   special_tokens_map.json      ← 必需
+    ///   tokenizer_config.json        ← 必需
+    /// ```
+    /// 用 fastembed 的 [`UserDefinedEmbeddingModel`] API, 绕开 hf-hub 联网 metadata fetch
+    /// (国内服务器连 huggingface.co timeout, hf-mirror.com 不返 Content-Range 不可用).
+    ///
+    /// 模型文件预下载方法 (本机国外):
+    /// ```bash
+    /// HF_HOME=/tmp/hf-cache hf download Xenova/bge-small-en-v1.5
+    /// # 然后 scp /tmp/hf-cache/hub/models--Xenova--bge-small-en-v1.5/snapshots/<commit>/ → 服务端
+    /// ```
+    pub fn from_files(dir: impl AsRef<Path>) -> Result<Self> {
+        let dir = dir.as_ref();
+        let read = |name: &str| -> Result<Vec<u8>> {
+            std::fs::read(dir.join(name))
+                .with_context(|| format!("read model file {}", dir.join(name).display()))
+        };
+        let onnx_file = read("onnx/model.onnx")?;
+        let tokenizer_files = TokenizerFiles {
+            tokenizer_file: read("tokenizer.json")?,
+            config_file: read("config.json")?,
+            special_tokens_map_file: read("special_tokens_map.json")?,
+            tokenizer_config_file: read("tokenizer_config.json")?,
+        };
+        let user_def = UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files)
+            .with_pooling(Pooling::Cls);
+        let init = InitOptionsUserDefined::new();
+        let embedder = TextEmbedding::try_new_from_user_defined(user_def, init)
+            .with_context(|| format!("init fastembed from local files at {}", dir.display()))?;
+        Ok(Self {
+            model: Arc::new(Mutex::new(embedder)),
+            model_name: "BAAI/bge-small-en-v1.5 (local)".to_string(),
+            dim: 384,
+        })
+    }
+
+    /// 指定 fastembed 内置模型构造 (会下载 ONNX, ~30s 首次).
+    ///
+    /// **国内服务器优先用 [`from_files`] 跳过 HF**. 见 ADR-003 / docs/known-issues.md.
     pub fn with_model(model: EmbeddingModel) -> Result<Self> {
         let (model_name, dim) = match model {
             EmbeddingModel::BGESmallENV15 => ("BAAI/bge-small-en-v1.5".to_string(), 384),
