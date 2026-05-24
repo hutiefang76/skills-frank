@@ -55,7 +55,7 @@ jobs:
           python3 -m pip install --user --quiet huggingface_hub
           mkdir -p ./hf-cache
           export PATH="$HOME/.local/bin:$PATH"
-          HF_HOME=$PWD/hf-cache huggingface-cli download Xenova/bge-small-en-v1.5
+          HF_HOME=$PWD/hf-cache hf download Xenova/bge-small-en-v1.5
           echo "--- cache size ---"
           du -sh ./hf-cache
           ls ./hf-cache/hub/models--Xenova--bge-small-en-v1.5/snapshots/*/
