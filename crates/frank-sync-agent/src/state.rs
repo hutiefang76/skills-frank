@@ -73,7 +73,13 @@ impl AppState {
                     // v0.8.1: FRANK_LOCAL_MODEL_DIR=/path/to/snapshot 走 offline 模式
                     // (国内服务器连不上 huggingface.co, 走预下模型). 不设走默认 HF 下载.
                     if let Ok(dir) = env::var("FRANK_LOCAL_MODEL_DIR") {
-                        if !dir.trim().is_empty() {
+                        if dir.trim().is_empty() {
+                            tracing::info!(
+                                "no OPENAI_API_KEY, no FRANK_LOCAL_MODEL_DIR: \
+                                 using LocalEmbedder (fastembed BAAI/bge-small 384d, will download from HF)"
+                            );
+                            Box::new(LocalEmbedder::small().context("init LocalEmbedder")?)
+                        } else {
                             tracing::info!(
                                 "FRANK_LOCAL_MODEL_DIR={dir}: using offline LocalEmbedder \
                                  (BAAI/bge-small 384d, 0 token, no network)"
@@ -82,12 +88,6 @@ impl AppState {
                                 LocalEmbedder::from_files(&dir)
                                     .context("init offline LocalEmbedder from files")?,
                             )
-                        } else {
-                            tracing::info!(
-                                "no OPENAI_API_KEY, no FRANK_LOCAL_MODEL_DIR: \
-                                 using LocalEmbedder (fastembed BAAI/bge-small 384d, will download from HF)"
-                            );
-                            Box::new(LocalEmbedder::small().context("init LocalEmbedder")?)
                         }
                     } else {
                         tracing::info!(

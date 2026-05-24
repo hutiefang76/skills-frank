@@ -74,6 +74,9 @@ toml = "0.8"
 # 走 path 依赖, 不上 crates.io
 frank-memory = { path = "../frank-memory" }
 
+# v0.10.4 ADR-009: 跨进程 CLI 凭据桥 (5 层 fallback + TokenKind + redact)
+frank-cred = { path = "../frank-cred" }
+
 # frank-orchestrator 真接: P6 Milestone 1 加 `frank orchestrator demo` 子命令
 # 启 tokio runtime 跑 LocalCliWorker (subprocess + stdin/stdout 包 claude/codex/opencode)
 frank-orchestrator = { path = "../frank-orchestrator" }

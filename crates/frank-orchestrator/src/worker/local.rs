@@ -51,6 +51,20 @@ pub enum CliProvider {
     Gemini,
 }
 
+impl From<CliProvider> for frank_cred::Provider {
+    fn from(p: CliProvider) -> Self {
+        match p {
+            CliProvider::Claude => Self::Claude,
+            CliProvider::Codex => Self::Codex,
+            CliProvider::Opencode => Self::Opencode,
+            CliProvider::Gemini => Self::Gemini,
+        }
+    }
+}
+
+// tokio Command 的 CommandEnv impl 在 frank-cred 自家 (feature = "tokio-cmd"),
+// 因 orphan rule frank-orchestrator 不能在这里 impl。
+
 impl CliProvider {
     fn bin(self) -> &'static str {
         match self {
@@ -191,7 +205,20 @@ impl Worker for LocalCliWorker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        strip_empty_api_keys(&mut cmd);
+        // v0.10.4 ADR-009: 5 层 fallback 找凭据 → 注 env (跨进程链解决 Keychain ACL).
+        // 命中: 注入 env var (claude --print 等优先读 env, 绕开 ACL).
+        // miss: strip_empty_api_keys 兜底清空值, 让 CLI 自家逻辑跑.
+        let cred_report = resolve_and_inject_or_strip(&mut cmd, self.provider);
+        if let Some(report) = &cred_report {
+            let _ = log_tx
+                .send(LogLine::info(format!(
+                    "frank-cred ✓ {} 注入 {} (source: {})",
+                    if report.injected_env { "env" } else { "file" },
+                    report.env_var.as_deref().unwrap_or("-"),
+                    report.source
+                )))
+                .await;
+        }
         apply_proxy_config(&mut cmd);
         if let Some(ws) = &self.workspace {
             cmd.current_dir(ws);
@@ -204,23 +231,27 @@ impl Worker for LocalCliWorker {
         let stdout = child.stdout.take().context("take subprocess stdout")?;
         let stderr = child.stderr.take().context("take subprocess stderr")?;
 
-        // 并行读 stdout (主响应) + stderr (按行 stream 到 log_tx)
+        // 并行读 stdout (主响应) + stderr (按行 stream 到 log_tx).
+        // v0.10.4 ADR-009 M2: 每条 line / stdout buf 经 frank_cred::redact_secrets 屏蔽 token,
+        // 防止 child CLI echo token 到 WS / Web UI 时泄漏.
         let log_tx_err = log_tx.clone();
         let stderr_task = tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
+                let safe = frank_cred::redact_secrets(&line);
                 let _ = log_tx_err
-                    .send(LogLine::new(LogLevel::Debug, format!("[stderr] {line}")))
+                    .send(LogLine::new(LogLevel::Debug, format!("[stderr] {safe}")))
                     .await;
             }
         });
 
-        // stdout 全收 (是主输出 — 给 StepOutput.stdout)
+        // stdout 全收 (是主输出 — 给 StepOutput.stdout). redact 后才放 StepOutput.
         let stdout_task = tokio::spawn(async move {
             let mut buf = String::new();
             let mut reader = BufReader::new(stdout);
             let _ = reader.read_to_string(&mut buf).await;
-            buf
+            // V3 M2: redact 全 stdout, 防 WS frame / Web UI 泄漏
+            frank_cred::redact_secrets(&buf)
         });
 
         // 等子进程 + 超时
@@ -258,9 +289,9 @@ impl Worker for LocalCliWorker {
             // (例: claude 401 / codex network error 等都打 stdout, 不带就只看到 exit code 没法诊断)
             let preview: String = stdout_str.chars().take(400).collect();
             let hint = if bin == "claude" && preview.contains("authentication") {
-                "\n💡 修复: 跑 `claude setup-token` 一次登录 CLI (Pro 订阅 OAuth)"
+                "\n💡 修复 (v0.10.4): 跑 `frank login provider claude` (自动 wrap setup-token)"
             } else if preview.contains("401") || preview.contains("Unauthorized") {
-                "\n💡 修复: 检查该 CLI 的 auth 配置, 跑 `<bin> auth login` 或 setup-token"
+                "\n💡 修复 (v0.10.4): `frank login provider <claude|codex|gemini|opencode>` (ADR-009 凭据桥)"
             } else {
                 ""
             };
@@ -281,7 +312,30 @@ impl Worker for LocalCliWorker {
     }
 }
 
-/// 清理"空字符串 API key"陷阱.
+/// v0.10.4 ADR-009: 跨进程 CLI 凭据桥的主入口.
+///
+/// 流程:
+/// 1. 试 [`frank_cred::resolve_and_inject`] — 5 层 fallback (env/frank-store/official/keyring/security CLI).
+///    命中 → 注入 env var (按 TokenKind 决定策略, V3 实施: 三类都注 env).
+/// 2. miss 或 frank-cred 解析失败 → 退回 [`strip_empty_api_keys`] 兜底 (清空值, CLI 自家逻辑).
+///
+/// 返回 `Some(InjectReport)` 表示命中, `None` 表示退回兜底.
+#[must_use]
+pub fn resolve_and_inject_or_strip(
+    cmd: &mut Command,
+    provider: CliProvider,
+) -> Option<frank_cred::InjectReport> {
+    match frank_cred::resolve_and_inject(cmd, provider.into()) {
+        Ok(report) => Some(report),
+        Err(e) => {
+            tracing::debug!("frank-cred miss ({provider:?}): {e}; fallback strip_empty");
+            strip_empty_api_keys(cmd);
+            None
+        }
+    }
+}
+
+/// 清理"空字符串 API key"陷阱 (兜底, 当 frank-cred 5 层全 miss 时).
 ///
 /// Claude Code 桌面 app / 某些 IDE 启动时把空 `ANTHROPIC_API_KEY=""` 注入 shell env;
 /// claude / codex / gemini CLI 检测到 env 存在 (即便空) 就走 "API key 认证" 路径,

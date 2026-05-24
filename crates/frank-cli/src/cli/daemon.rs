@@ -298,7 +298,9 @@ pub fn open_browser_or_hint() -> Result<()> {
 
     // Banner (owo_colors 链式 .x().y() 触发 borrow 问题, 只用单色 + bold)
     println!();
-    let frank_title = "frank".if_supports_color(Stream::Stdout, |t| t.bright_cyan()).to_string();
+    let frank_title = "frank"
+        .if_supports_color(Stream::Stdout, |t| t.bright_cyan())
+        .to_string();
     let version_dim = format!(" v{}", env!("CARGO_PKG_VERSION"))
         .if_supports_color(Stream::Stdout, |t| t.dimmed())
         .to_string();
@@ -308,17 +310,26 @@ pub fn open_browser_or_hint() -> Result<()> {
     println!("  服务状态  {status_label}  {status_detail}");
     if status_label.contains("running") {
         let url = format!("http://127.0.0.1:{DEFAULT_PORT}");
-        let url_colored = url.if_supports_color(Stream::Stdout, |t| t.bright_blue()).to_string();
+        let url_colored = url
+            .if_supports_color(Stream::Stdout, |t| t.bright_blue())
+            .to_string();
         println!("  Web UI    {url_colored}");
     }
     println!();
     // 常用命令
-    println!("  {}", "常用命令".if_supports_color(Stream::Stdout, |t| t.bold()));
+    println!(
+        "  {}",
+        "常用命令".if_supports_color(Stream::Stdout, |t| t.bold())
+    );
     println!("    frank ai ask --to <claude|gpt|opencode|gemini> \"...\"     跨 AI 一问一答");
     println!("    frank ai history                                          查 ask 历史");
-    println!("    frank list                                                列 manifest 里全部 skill");
+    println!(
+        "    frank list                                                列 manifest 里全部 skill"
+    );
     println!("    frank install <name>                                      装一个 skill / MCP");
-    println!("    frank scan [--mcp]                                        扫本机三平台 skill / MCP");
+    println!(
+        "    frank scan [--mcp]                                        扫本机三平台 skill / MCP"
+    );
     println!("    frank login                                               配 sync-agent token");
     println!("    frank config show / set-proxy / detect-proxy             看 / 配 proxy");
     println!("    frank daemon install / status                             装后台服务");
@@ -327,12 +338,16 @@ pub fn open_browser_or_hint() -> Result<()> {
         println!("  {}", "在浏览器打开 Web UI:".dimmed());
         println!(
             "    {}",
-            format!("open http://127.0.0.1:{DEFAULT_PORT}").if_supports_color(Stream::Stdout, |t| t.dimmed())
+            format!("open http://127.0.0.1:{DEFAULT_PORT}")
+                .if_supports_color(Stream::Stdout, |t| t.dimmed())
         );
     } else {
         println!("  {}", "服务没跑 — 启:".dimmed());
         println!("    {}", "brew services start frank".dimmed());
-        println!("    {}", "  (或 frank daemon install — 非 brew 装的)".dimmed());
+        println!(
+            "    {}",
+            "  (或 frank daemon install — 非 brew 装的)".dimmed()
+        );
     }
     println!();
     Ok(())
@@ -356,8 +371,14 @@ fn detect_daemon_status() -> (String, String) {
             .and_then(|p| p.trim_end_matches(';').parse::<u32>().ok())
             .filter(|p| *p != 0);
         if let Some(pid) = pid {
-            return ("✓ running".to_string(), format!("(PID {pid}, 注册名 {label})"));
+            return (
+                "✓ running".to_string(),
+                format!("(PID {pid}, 注册名 {label})"),
+            );
         }
     }
-    ("✗ not running".to_string(), "(brew services start frank 或 frank daemon install)".to_string())
+    (
+        "✗ not running".to_string(),
+        "(brew services start frank 或 frank daemon install)".to_string(),
+    )
 }

@@ -86,8 +86,8 @@ impl LocalEmbedder {
             special_tokens_map_file: read("special_tokens_map.json")?,
             tokenizer_config_file: read("tokenizer_config.json")?,
         };
-        let user_def = UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files)
-            .with_pooling(Pooling::Cls);
+        let user_def =
+            UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files).with_pooling(Pooling::Cls);
         let init = InitOptionsUserDefined::new();
         let embedder = TextEmbedding::try_new_from_user_defined(user_def, init)
             .with_context(|| format!("init fastembed from local files at {}", dir.display()))?;

@@ -495,16 +495,16 @@ async fn api_list_skills() -> Result<Json<Vec<SkillRow>>, (StatusCode, Json<OkRe
             .iter()
             .map(|s| {
                 let installed = state.get(&s.name).is_some();
-                let (sref, plats, enabled) = state.get(&s.name).map_or(
-                    (String::new(), Vec::new(), false),
-                    |st| {
-                        (
-                            st.source_ref.chars().take(7).collect::<String>(),
-                            st.platforms.iter().map(|p| format!("{p:?}")).collect(),
-                            st.enabled,
-                        )
-                    },
-                );
+                let (sref, plats, enabled) =
+                    state
+                        .get(&s.name)
+                        .map_or((String::new(), Vec::new(), false), |st| {
+                            (
+                                st.source_ref.chars().take(7).collect::<String>(),
+                                st.platforms.iter().map(|p| format!("{p:?}")).collect(),
+                                st.enabled,
+                            )
+                        });
                 SkillRow {
                     name: s.name.clone(),
                     visibility: format!("{:?}", s.visibility),
@@ -540,7 +540,12 @@ async fn api_install_skill(
     })
     .await
     .map_err(internal_err)?
-    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map(|()| {
+        Json(OkResp {
+            ok: true,
+            error: None,
+        })
+    })
     .map_err(handler_err)
 }
 
@@ -557,7 +562,12 @@ async fn api_uninstall_skill(
     })
     .await
     .map_err(internal_err)?
-    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map(|()| {
+        Json(OkResp {
+            ok: true,
+            error: None,
+        })
+    })
     .map_err(handler_err)
 }
 
@@ -570,7 +580,12 @@ async fn api_enable_skill(
     })
     .await
     .map_err(internal_err)?
-    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map(|()| {
+        Json(OkResp {
+            ok: true,
+            error: None,
+        })
+    })
     .map_err(handler_err)
 }
 
@@ -583,7 +598,12 @@ async fn api_disable_skill(
     })
     .await
     .map_err(internal_err)?
-    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map(|()| {
+        Json(OkResp {
+            ok: true,
+            error: None,
+        })
+    })
     .map_err(handler_err)
 }
 
@@ -602,7 +622,9 @@ struct MemListReq {
     #[serde(default = "default_mem_limit")]
     limit: u64,
 }
-fn default_mem_limit() -> u64 { 50 }
+fn default_mem_limit() -> u64 {
+    50
+}
 
 #[derive(Deserialize)]
 struct MemSearchReq {
@@ -630,7 +652,11 @@ struct MemAddRawReq {
     session: Option<String>,
 }
 
-fn scope_from(user: Option<String>, agent: Option<String>, session: Option<String>) -> frank_memory::Scope {
+fn scope_from(
+    user: Option<String>,
+    agent: Option<String>,
+    session: Option<String>,
+) -> frank_memory::Scope {
     frank_memory::Scope {
         user_id: user,
         agent_id: agent,
@@ -680,7 +706,12 @@ async fn api_memory_add_raw(
     })
     .await
     .map_err(internal_err)?
-    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map(|()| {
+        Json(OkResp {
+            ok: true,
+            error: None,
+        })
+    })
     .map_err(handler_err)
 }
 
@@ -698,7 +729,12 @@ async fn api_memory_delete(
     })
     .await
     .map_err(internal_err)?
-    .map(|()| Json(OkResp { ok: true, error: None }))
+    .map(|()| {
+        Json(OkResp {
+            ok: true,
+            error: None,
+        })
+    })
     .map_err(handler_err)
 }
 

@@ -77,8 +77,8 @@ pub fn collect_entries(cache_root: &Path, state: &State) -> Result<Vec<CacheEntr
         }
     }
     let mut out = Vec::new();
-    for entry in fs::read_dir(cache_root)
-        .with_context(|| format!("read_dir {}", cache_root.display()))?
+    for entry in
+        fs::read_dir(cache_root).with_context(|| format!("read_dir {}", cache_root.display()))?
     {
         let entry = entry?;
         let key = entry.file_name().to_string_lossy().into_owned();
@@ -86,9 +86,9 @@ pub fn collect_entries(cache_root: &Path, state: &State) -> Result<Vec<CacheEntr
             continue;
         }
         let size_bytes = dir_size(&entry.path()).unwrap_or(0);
-        let (name, url) = by_key.get(&key).map_or((None, None), |(n, u)| {
-            (Some(n.clone()), Some(u.clone()))
-        });
+        let (name, url) = by_key
+            .get(&key)
+            .map_or((None, None), |(n, u)| (Some(n.clone()), Some(u.clone())));
         out.push(CacheEntry {
             key,
             name,

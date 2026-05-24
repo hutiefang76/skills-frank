@@ -21,6 +21,7 @@
 //! - SSH 拉 token 时, 命令在远端跑 `grep | cut`, 不在本地 shell 历史留 token
 
 use std::fs;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -28,13 +29,18 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
 /// `frank login` / `frank logout` 参数。
+///
+/// # 两类登录 (v0.10.4 ADR-009 分离)
+///
+/// - **sync-agent token** (默认): `frank login [--token | --from-host]` — 给 frank 后端用
+/// - **provider 凭据** (新): `frank login provider <CMD>` — 给跨进程调 claude/codex/gemini/opencode 用
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// 子命令 (目前只有 logout, 后续 v0.7 加 1Password / OAuth).
+    /// 子命令: `logout` / `provider <CMD>`。
     #[command(subcommand)]
     pub command: Option<LoginCommand>,
 
-    /// 直接输入 token (优先级最高, 适合手敲 / 团队分发).
+    /// 直接输入 sync-agent token (优先级最高, 适合手敲 / 团队分发).
     #[arg(long, conflicts_with = "from_host")]
     pub token: Option<String>,
 
@@ -45,7 +51,7 @@ pub struct Args {
     #[arg(long, value_name = "SSH_HOST")]
     pub from_host: Option<String>,
 
-    /// 显示当前 token (脱敏: 前 4 + 后 4 字符).
+    /// 显示当前 sync-agent token (脱敏: 前 4 + 后 4 字符).
     #[arg(long)]
     pub show: bool,
 }
@@ -53,14 +59,57 @@ pub struct Args {
 /// `frank login` 子命令枚举。
 #[derive(Subcommand, Debug)]
 pub enum LoginCommand {
-    /// 移除本机已配 token (~/.frank/.token).
+    /// 移除本机已配 sync-agent token (`~/.frank/.token`).
     Logout,
+
+    /// 管理 provider CLI 凭据 (claude / codex / gemini / opencode)。
+    ///
+    /// 解决跨进程调 (Codex → frank → claude) 拿不到 Keychain token 的 ACL 问题。
+    /// 详见 docs/ADR/009-cli-credential-bridge.md。
+    Provider {
+        /// provider 子命令
+        #[command(subcommand)]
+        cmd: ProviderCommand,
+    },
+}
+
+/// `frank login provider` 子命令枚举。
+#[derive(Subcommand, Debug)]
+pub enum ProviderCommand {
+    /// 列所有 provider 凭据状态 (5 层 fallback 命中表)。
+    List,
+
+    /// 删 frank store 凭据 (官方 file 不动)。
+    Remove {
+        /// claude / codex / gemini / opencode
+        name: String,
+    },
+
+    /// 显示指定 provider 凭据状态 (脱敏)。
+    Show {
+        /// claude / codex / gemini / opencode
+        name: String,
+    },
+
+    /// Bootstrap claude (跑 `claude setup-token` + 自动复制 token 到 frank store)。
+    Claude,
+
+    /// Bootstrap codex (跑 `codex auth login` + 自动复制 token 到 frank store)。
+    Codex,
+
+    /// Bootstrap gemini (跑 `gemini auth login` + 自动复制 token 到 frank store)。
+    Gemini,
+
+    /// Bootstrap opencode (跑 `opencode auth login` + 自动复制 token 到 frank store)。
+    Opencode,
 }
 
 /// 执行 login / logout 命令。
 pub fn run(args: Args) -> Result<()> {
-    if matches!(args.command, Some(LoginCommand::Logout)) {
-        return logout();
+    match args.command {
+        Some(LoginCommand::Logout) => return logout(),
+        Some(LoginCommand::Provider { cmd }) => return handle_provider(cmd),
+        None => {}
     }
     if args.show {
         return show();
@@ -75,39 +124,192 @@ pub fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
-/// 无参数 `frank login` 显示的友好引导. 不提项目内部 host 名 (如 `tx`) —
-/// 那是部署者的私事, 用户不该被教育.
+// ============================================================================
+// v0.10.4 ADR-009: provider 子命令组 (跨进程 CLI 凭据桥)
+// ============================================================================
+
+fn handle_provider(cmd: ProviderCommand) -> Result<()> {
+    match cmd {
+        ProviderCommand::List => provider_list(),
+        ProviderCommand::Remove { name } => provider_remove(&name),
+        ProviderCommand::Show { name } => provider_show(&name),
+        ProviderCommand::Claude => provider_bootstrap(frank_cred::Provider::Claude),
+        ProviderCommand::Codex => provider_bootstrap(frank_cred::Provider::Codex),
+        ProviderCommand::Gemini => provider_bootstrap(frank_cred::Provider::Gemini),
+        ProviderCommand::Opencode => provider_bootstrap(frank_cred::Provider::Opencode),
+    }
+}
+
+/// Bootstrap: 跑 official setup 命令 + 自动复制 token 到 frank store。
+fn provider_bootstrap(provider: frank_cred::Provider) -> Result<()> {
+    let (bin, args) = provider.setup_command();
+    crate::log::ui::section(&format!("frank login provider {provider}"));
+    crate::log::ui::info(&format!("即将运行: {bin} {}", args.join(" ")));
+    crate::log::ui::info(&format!(
+        "完成后 frank 自动复制 token → ~/.frank/credentials/{provider}.json (mode 0600)"
+    ));
+    println!();
+
+    // TTY 检测 (ADR-009 R-C2: headless 跑不通 setup-token, 给替代指引)
+    if !std::io::stdin().is_terminal() {
+        bail!(
+            "无 TTY (ssh / 远程 / 后台 ?). {bin} {} 需要交互。\n\
+             手动方案: export {}=<your-key>",
+            args.join(" "),
+            provider.env_var_name()
+        );
+    }
+
+    let status = Command::new(bin)
+        .args(args)
+        .status()
+        .with_context(|| format!("spawn `{bin}` (是否装了? PATH 包含吗?)"))?;
+    if !status.success() {
+        bail!("{bin} {} 退出 {}", args.join(" "), status);
+    }
+
+    // 跑完 setup, 探 official file → 复制到 frank store
+    match frank_cred::import_official_to_store(provider) {
+        Ok(saved) => {
+            crate::log::ui::success(&format!("token 复制到 {} (mode 0600)", saved.display()));
+            crate::log::ui::info(&format!(
+                "之后 frank ai ask --to {provider} 跨任意 launcher 都能用"
+            ));
+            Ok(())
+        }
+        Err(frank_cred::CredError::NotFound(_)) => {
+            bail!(
+                "setup 已完成但找不到 {provider} 的 official credential file. \
+                 探测路径见 ADR-009. 可手动: export {}=<your-key>",
+                provider.env_var_name()
+            )
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// 列所有 provider 凭据状态 (5 层 fallback 命中表)。
+fn provider_list() -> Result<()> {
+    crate::log::ui::section("frank login provider — 凭据信任链状态");
+    println!();
+    println!("{:<10} {:<20} Source", "Provider", "Status");
+    println!("{}", "-".repeat(60));
+
+    for &provider in frank_cred::Provider::all() {
+        let (status, source) = check_provider_status(provider);
+        println!("{provider:<10} {status:<20} {source}");
+    }
+    println!();
+    crate::log::ui::info("缺失? 跑: frank login provider <claude|codex|gemini|opencode>");
+    Ok(())
+}
+
+/// 探单个 provider 状态 (用 frank-cred 的 5 层 fallback 但不注入 env)。
+fn check_provider_status(provider: frank_cred::Provider) -> (String, String) {
+    // 复用 5 层探测, 用 dummy Command (不实际 spawn)
+    let mut probe = Command::new("true");
+    match frank_cred::resolve_and_inject(&mut probe, provider) {
+        Ok(report) => ("✓ 命中".to_string(), report.source.to_string()),
+        Err(_) => ("✗ 缺失".to_string(), "(无)".to_string()),
+    }
+}
+
+/// 显示指定 provider 凭据 (脱敏)。
+fn provider_show(name: &str) -> Result<()> {
+    let provider = frank_cred::Provider::parse_name(name).map_err(|e| anyhow::anyhow!(e))?;
+    crate::log::ui::section(&format!("frank login provider show {provider}"));
+
+    let mut probe = Command::new("true");
+    match frank_cred::resolve_and_inject(&mut probe, provider) {
+        Ok(report) => {
+            crate::log::ui::info(&format!("source:   {}", report.source));
+            crate::log::ui::info(&format!(
+                "inject env: {} {}",
+                if report.injected_env {
+                    "yes"
+                } else {
+                    "no (OAuth session)"
+                },
+                report.env_var.as_deref().unwrap_or("")
+            ));
+            Ok(())
+        }
+        Err(e) => {
+            crate::log::ui::warn(&format!("缺失: {e}"));
+            crate::log::ui::info(&format!("跑: frank login provider {provider}"));
+            Ok(())
+        }
+    }
+}
+
+/// 删 frank store 中的 provider 凭据 (官方 file 不动)。
+fn provider_remove(name: &str) -> Result<()> {
+    let provider = frank_cred::Provider::parse_name(name).map_err(|e| anyhow::anyhow!(e))?;
+    let removed = frank_cred::store::remove(provider)?;
+    if removed {
+        crate::log::ui::success(&format!(
+            "已删 frank store 中 {provider} 凭据 (官方 file 不动)"
+        ));
+    } else {
+        crate::log::ui::warn(&format!(
+            "{provider} 凭据在 frank store 中不存在 (本来就没)"
+        ));
+    }
+    Ok(())
+}
+
+/// 无参数 `frank login` 显示的友好引导.
+///
+/// v0.10.4 ADR-009 起, banner 顶部明确分两类:
+/// - **(1) sync-agent token** — frank 后端 memory / 跨设备
+/// - **(2) provider 凭据** — 跨进程调 claude/codex/gemini/opencode 用
 fn print_guide() {
     use owo_colors::{OwoColorize, Stream};
 
-    crate::log::ui::section("frank login — 配置 sync-agent token");
+    crate::log::ui::section("frank login — 两类登录");
     println!();
-    println!("frank 的 memory / 跨设备同步需要 token 访问后端 sync-agent.");
     println!(
-        "skill / daemon / orchestrator 本地功能 {} token (可跳过此步).",
-        "不需要".if_supports_color(Stream::Stdout, |t| t.bold())
+        "{}",
+        "frank 有两类登录, 各管各的:".if_supports_color(Stream::Stdout, |t| t.bold())
     );
     println!();
     println!(
-        "{} (从你部署的 sync-agent 拿的, 或同事给的):",
-        "有 token 的话".if_supports_color(Stream::Stdout, |t| t.bold())
+        "  {}  frank login [--token / --from-host / --show]",
+        "(1) sync-agent token".if_supports_color(Stream::Stdout, |t| t.cyan())
     );
-    println!("  frank login --token <token>");
+    println!("      给 frank 后端 (memory / 跨设备同步) 用 — 你部署的 sync-agent token");
     println!();
     println!(
-        "{} (高级):",
+        "  {}  frank login provider <claude|codex|gemini|opencode>",
+        "(2) provider 凭据".if_supports_color(Stream::Stdout, |t| t.cyan())
+    );
+    println!("      跨进程调第三方 CLI 用 (Codex → frank → claude 链路防 Keychain ACL)");
+    println!("      v0.10.4 ADR-009 新增 — frank login provider list 查状态");
+    println!();
+    println!(
+        "{}",
+        "—— (1) sync-agent token 详细用法 ——".if_supports_color(Stream::Stdout, |t| t.dimmed())
+    );
+    println!();
+    println!(
+        "  {} (从你部署的 sync-agent 拿的, 或同事给的):",
+        "有 token".if_supports_color(Stream::Stdout, |t| t.bold())
+    );
+    println!("    frank login --token <token>");
+    println!();
+    println!(
+        "  {} (高级):",
         "自己部署了 sync-agent + SSH 配好".if_supports_color(Stream::Stdout, |t| t.bold())
     );
-    println!("  frank login --from-host <your-ssh-alias>      # 自动从远端 /opt/frank/.env 抓");
+    println!("    frank login --from-host <your-ssh-alias>");
     println!();
     println!(
-        "{} 部署一个:",
+        "  {} 部署: https://github.com/hutiefang76/skills-frank/blob/main/deploy/README.md",
         "还没 sync-agent?".if_supports_color(Stream::Stdout, |t| t.bold())
     );
-    println!("  https://github.com/hutiefang76/skills-frank/blob/main/deploy/README.md");
     println!();
-    println!("已登录看 token (脱敏): frank login --show");
-    println!("登出:                  frank logout");
+    println!("  已登录看 token (脱敏): frank login --show");
+    println!("  登出:                  frank logout");
 }
 
 fn token_path() -> Result<PathBuf> {

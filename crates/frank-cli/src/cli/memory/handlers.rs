@@ -60,7 +60,10 @@ pub fn run_add(client: &SyncClient, args: AddArgs) -> Result<()> {
             crate::log::ui::warn("extract returned 0 facts; nothing stored");
             return Ok(());
         }
-        crate::log::ui::info(&format!("client-extracted {} fact(s) via `{extract}`", facts.len()));
+        crate::log::ui::info(&format!(
+            "client-extracted {} fact(s) via `{extract}`",
+            facts.len()
+        ));
         let mut stored = 0usize;
         for f in &facts {
             match client.add_raw(f, &scope, metadata.as_ref()) {
@@ -96,7 +99,9 @@ fn extract_facts_via_cli(cli: &str, content: &str) -> Result<Vec<String>> {
         "claude" => ("claude", vec!["--print"]),
         "codex" => ("codex", vec!["exec", "--skip-git-repo-check"]),
         "gemini" => ("gemini", vec!["--prompt", "-"]),
-        other => anyhow::bail!("unknown extractor cli: `{other}` (支持: claude / codex / gemini / none)"),
+        other => {
+            anyhow::bail!("unknown extractor cli: `{other}` (支持: claude / codex / gemini / none)")
+        }
     };
     if which::which(bin).is_err() {
         anyhow::bail!("`{bin}` 不在 PATH; 装好或换 --extract-with <other>");
@@ -118,14 +123,19 @@ TEXT TO ANALYZE:\n{content}\n\nJSON OUTPUT:"
         .with_context(|| format!("spawn `{bin}`"))?;
     use std::io::Write as _;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(prompt.as_bytes())
+        stdin
+            .write_all(prompt.as_bytes())
             .with_context(|| format!("write prompt to `{bin}` stdin"))?;
         drop(stdin);
     }
-    let out = child.wait_with_output()
+    let out = child
+        .wait_with_output()
         .with_context(|| format!("wait `{bin}`"))?;
     if !out.status.success() {
-        anyhow::bail!("`{bin}` exit {} during fact extract", out.status.code().unwrap_or(-1));
+        anyhow::bail!(
+            "`{bin}` exit {} during fact extract",
+            out.status.code().unwrap_or(-1)
+        );
     }
     let raw = String::from_utf8_lossy(&out.stdout).to_string();
     parse_facts_json(&raw)
@@ -139,8 +149,12 @@ fn parse_facts_json(raw: &str) -> Result<Vec<String>> {
         return Ok(v);
     }
     // 2. 找第一个 `[` 到 last `]` 之间
-    let start = raw.find('[').ok_or_else(|| anyhow!("no `[` in cli output: {raw:?}"))?;
-    let end = raw.rfind(']').ok_or_else(|| anyhow!("no `]` in cli output"))?;
+    let start = raw
+        .find('[')
+        .ok_or_else(|| anyhow!("no `[` in cli output: {raw:?}"))?;
+    let end = raw
+        .rfind(']')
+        .ok_or_else(|| anyhow!("no `]` in cli output"))?;
     if end <= start {
         anyhow::bail!("invalid `[..]` order in cli output: {raw:?}");
     }

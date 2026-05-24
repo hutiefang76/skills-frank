@@ -1,0 +1,49 @@
+[package]
+name = "frank-cred"
+description = "frank 跨进程 CLI 凭据桥: 5 层 fallback + TokenKind 安全 export + 跨平台 keyring"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# 启用 `tokio-cmd` 后 impl CommandEnv for tokio::process::Command.
+# frank-orchestrator 用 (跨 crate orphan rule 要求 frank-cred 自家 impl).
+tokio-cmd = ["dep:tokio"]
+
+[dependencies]
+# workspace 共享
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true, optional = true, features = ["process"] }
+
+# crate 专属
+secrecy = { version = "0.10", features = ["serde"] }   # SecretString, zero-on-drop
+keyring = "3.6"                                          # 跨平台 keychain/credman/secret-service
+dirs = "5.0"                                              # 跨平台 home/config 路径
+regex = "1.11"                                            # redaction 正则
+toml = "0.8"                                              # codex credentials.toml 解析
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["fs"] }            # 0600 / 0700 chmod
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+] }                                                       # ACL 设当前用户独占
+
+[dev-dependencies]
+tempfile = { workspace = true }

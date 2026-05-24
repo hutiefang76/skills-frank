@@ -18,8 +18,6 @@ use clap::{Parser, Subcommand};
 pub mod ai;
 pub mod cache;
 pub mod config;
-pub mod ui;
-pub mod update;
 pub mod daemon;
 pub mod dedupe;
 pub mod disable;
@@ -35,7 +33,9 @@ pub mod orchestrator;
 pub mod orchestrator_server;
 pub mod scan;
 pub mod sync;
+pub mod ui;
 pub mod uninstall;
+pub mod update;
 
 /// frank — AI 工具链治理平台 CLI。
 ///

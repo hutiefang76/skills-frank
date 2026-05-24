@@ -61,9 +61,9 @@ pub fn run(args: Args) -> Result<()> {
 
     let targets: Vec<SkillState> = if let Some(name) = args.name.as_ref() {
         // 单卸: 用户显式指定, 任何 visibility 都行 (community 自己装的也能单卸)
-        let entry = state
-            .get(name)
-            .ok_or_else(|| anyhow::anyhow!("`{name}` is not installed (no record in state.json)"))?;
+        let entry = state.get(name).ok_or_else(|| {
+            anyhow::anyhow!("`{name}` is not installed (no record in state.json)")
+        })?;
         vec![entry.clone()]
     } else {
         // 无参数 = 清 frank 官方装的全部 (frank-official + frank-recommended)
@@ -73,13 +73,18 @@ pub fn run(args: Args) -> Result<()> {
             .cloned()
             .collect();
         if entries.is_empty() {
-            crate::log::ui::info("没 frank 官方 skill 可卸 (state.json 没 frank-official / frank-recommended)");
+            crate::log::ui::info(
+                "没 frank 官方 skill 可卸 (state.json 没 frank-official / frank-recommended)",
+            );
             return Ok(());
         }
         let total = state.iter().count();
         let skipped = total - entries.len();
         if args.including_3rd_party {
-            crate::log::ui::warn(&format!("--including-3rd-party: 卸 {} 个 (含第三方)", entries.len()));
+            crate::log::ui::warn(&format!(
+                "--including-3rd-party: 卸 {} 个 (含第三方)",
+                entries.len()
+            ));
         } else if skipped > 0 {
             crate::log::ui::warn(&format!(
                 "卸 {} 个 frank 官方 skill — {} 个第三方 (community/team/private) 保留 (加 --including-3rd-party 也清掉)",
@@ -138,7 +143,10 @@ fn is_frank_owned(entry: &SkillState, including_3rd_party: bool) -> bool {
     }
     // 优先用 state 里记的 visibility
     if let Some(vis) = entry.visibility {
-        return matches!(vis, Visibility::FrankOfficial | Visibility::FrankRecommended);
+        return matches!(
+            vis,
+            Visibility::FrankOfficial | Visibility::FrankRecommended
+        );
     }
     // fallback: manifest 找
     let manifests = crate::manifest::parser::discover().unwrap_or_default();
@@ -173,6 +181,9 @@ fn purge_cache_dir() -> Result<()> {
             crate::log::ui::warn(&format!("删 {} 失败: {e}", entry.path().display()));
         }
     }
-    crate::log::ui::success(&format!("git cache 已清 ({n} 个 repo, {})", cache.display()));
+    crate::log::ui::success(&format!(
+        "git cache 已清 ({n} 个 repo, {})",
+        cache.display()
+    ));
     Ok(())
 }

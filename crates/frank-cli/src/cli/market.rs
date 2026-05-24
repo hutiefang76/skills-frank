@@ -83,7 +83,10 @@ fn find_github_token() -> Option<String> {
         }
     }
     // 兜底: gh auth token (用户装 gh 登录过的话最稳)
-    if let Ok(out) = std::process::Command::new("gh").args(["auth", "token"]).output() {
+    if let Ok(out) = std::process::Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+    {
         if out.status.success() {
             let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !t.is_empty() {
@@ -95,11 +98,18 @@ fn find_github_token() -> Option<String> {
 }
 
 async fn list_dir_names(client: &reqwest::Client, url: &str) -> Result<Vec<String>> {
-    let resp = client.get(url).send().await.with_context(|| format!("GET {url}"))?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("GET {url}"))?;
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("GitHub API returned {status}: {}", body.chars().take(200).collect::<String>());
+        anyhow::bail!(
+            "GitHub API returned {status}: {}",
+            body.chars().take(200).collect::<String>()
+        );
     }
     let items: Vec<serde_json::Value> = resp.json().await.context("parse GH contents JSON")?;
     Ok(items
@@ -189,11 +199,18 @@ async fn list() -> Result<()> {
 async fn sync() -> Result<()> {
     crate::log::ui::section("frank market sync — 写 manifest 到 ~/.frank/manifests/");
     println!();
-    let mcp = fetch_mcp_servers().await.context("fetch MCP servers list")?;
-    crate::log::ui::info(&format!("拿到 {} 个 MCP server (modelcontextprotocol/servers)", mcp.len()));
+    let mcp = fetch_mcp_servers()
+        .await
+        .context("fetch MCP servers list")?;
+    crate::log::ui::info(&format!(
+        "拿到 {} 个 MCP server (modelcontextprotocol/servers)",
+        mcp.len()
+    ));
     write_mcp_manifest(&mcp)?;
 
-    let skills = fetch_anthropic_skills().await.context("fetch anthropic skills list")?;
+    let skills = fetch_anthropic_skills()
+        .await
+        .context("fetch anthropic skills list")?;
     crate::log::ui::info(&format!("拿到 {} 个 anthropic skill", skills.len()));
     write_anthropic_skills_manifest(&skills)?;
 
@@ -226,7 +243,11 @@ fn write_mcp_manifest(entries: &[McpEntry]) -> Result<()> {
         );
     }
     fs::write(&path, yaml).with_context(|| format!("write {}", path.display()))?;
-    crate::log::ui::success(&format!("  ✓ {} ({} 个 MCP)", path.display(), entries.len()));
+    crate::log::ui::success(&format!(
+        "  ✓ {} ({} 个 MCP)",
+        path.display(),
+        entries.len()
+    ));
     Ok(())
 }
 
@@ -248,6 +269,10 @@ fn write_anthropic_skills_manifest(entries: &[AnthropicSkill]) -> Result<()> {
         );
     }
     fs::write(&path, yaml).with_context(|| format!("write {}", path.display()))?;
-    crate::log::ui::success(&format!("  ✓ {} ({} 个 skill)", path.display(), entries.len()));
+    crate::log::ui::success(&format!(
+        "  ✓ {} ({} 个 skill)",
+        path.display(),
+        entries.len()
+    ));
     Ok(())
 }

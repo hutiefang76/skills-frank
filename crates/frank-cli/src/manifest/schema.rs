@@ -148,11 +148,7 @@ pub enum Source {
 #[serde(rename_all = "kebab-case")]
 pub enum Visibility {
     /// frank 项目方自研开源 — 装 frank 默认带, 维护者是项目方 (例: nacos-ops, streampark-ops).
-    #[serde(
-        alias = "official",
-        alias = "frank-own",
-        alias = "own-public"
-    )]
+    #[serde(alias = "official", alias = "frank-own", alias = "own-public")]
     FrankOfficial,
 
     /// frank 项目方精选的 upstream / 第三方 skill — 默认列在 builtin, 一键装 (例: skill-creator).

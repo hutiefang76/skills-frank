@@ -91,10 +91,9 @@ pub fn run(args: Args) -> Result<()> {
         skill_owned = Some(s);
         skill_ref = skill_owned.as_ref().unwrap();
     } else {
-        name = args
-            .name
-            .clone()
-            .ok_or_else(|| anyhow!("提供 skill name (例 `frank install doris-ops`) 或 --url <git>"))?;
+        name = args.name.clone().ok_or_else(|| {
+            anyhow!("提供 skill name (例 `frank install doris-ops`) 或 --url <git>")
+        })?;
 
         // 1. 加载 manifest
         let manifests = mparser::discover()?;
@@ -245,15 +244,16 @@ fn synthesize_skill_from_url(
         .map_or((url.to_string(), None), |(u, p)| {
             (u.to_string(), Some(p.to_string()))
         });
-    let (clean_url, ref_from_query) = url_no_frag
-        .split_once('?')
-        .map_or((url_no_frag.clone(), None), |(u, q)| {
-            // 简单 query parse, 只认 ref=xxx (其它 query 暂时丢)
-            let r = q.split('&').find_map(|kv| {
-                kv.strip_prefix("ref=").map(String::from)
+    let (clean_url, ref_from_query) =
+        url_no_frag
+            .split_once('?')
+            .map_or((url_no_frag.clone(), None), |(u, q)| {
+                // 简单 query parse, 只认 ref=xxx (其它 query 暂时丢)
+                let r = q
+                    .split('&')
+                    .find_map(|kv| kv.strip_prefix("ref=").map(String::from));
+                (u.to_string(), r)
             });
-            (u.to_string(), r)
-        });
     let git_ref = override_ref
         .map(String::from)
         .or(ref_from_query)
@@ -314,8 +314,7 @@ mod tests {
 
     #[test]
     fn url_default_ref_is_main() {
-        let s =
-            synthesize_skill_from_url("https://github.com/foo/bar.git", None, None).unwrap();
+        let s = synthesize_skill_from_url("https://github.com/foo/bar.git", None, None).unwrap();
         let (r, sp) = extract_ref_and_subpath(&s);
         assert_eq!(r, "main");
         assert_eq!(sp, None);
@@ -324,45 +323,30 @@ mod tests {
 
     #[test]
     fn flag_ref_overrides_default() {
-        let s = synthesize_skill_from_url(
-            "https://github.com/foo/bar.git",
-            None,
-            Some("master"),
-        )
-        .unwrap();
+        let s = synthesize_skill_from_url("https://github.com/foo/bar.git", None, Some("master"))
+            .unwrap();
         assert_eq!(extract_ref_and_subpath(&s).0, "master");
     }
 
     #[test]
     fn url_query_ref_parsed() {
-        let s = synthesize_skill_from_url(
-            "https://github.com/foo/bar.git?ref=dev",
-            None,
-            None,
-        )
-        .unwrap();
+        let s = synthesize_skill_from_url("https://github.com/foo/bar.git?ref=dev", None, None)
+            .unwrap();
         assert_eq!(extract_ref_and_subpath(&s).0, "dev");
     }
 
     #[test]
     fn flag_ref_wins_over_query_ref() {
-        let s = synthesize_skill_from_url(
-            "https://github.com/foo/bar.git?ref=dev",
-            None,
-            Some("prod"),
-        )
-        .unwrap();
+        let s =
+            synthesize_skill_from_url("https://github.com/foo/bar.git?ref=dev", None, Some("prod"))
+                .unwrap();
         assert_eq!(extract_ref_and_subpath(&s).0, "prod");
     }
 
     #[test]
     fn url_subpath_fragment_still_works() {
-        let s = synthesize_skill_from_url(
-            "https://github.com/foo/bar.git#sub/path",
-            None,
-            None,
-        )
-        .unwrap();
+        let s = synthesize_skill_from_url("https://github.com/foo/bar.git#sub/path", None, None)
+            .unwrap();
         let (r, sp) = extract_ref_and_subpath(&s);
         assert_eq!(r, "main");
         assert_eq!(sp.as_deref(), Some("sub/path"));
@@ -384,12 +368,8 @@ mod tests {
 
     #[test]
     fn override_name_wins() {
-        let s = synthesize_skill_from_url(
-            "https://github.com/foo/bar.git",
-            Some("my-alias"),
-            None,
-        )
-        .unwrap();
+        let s = synthesize_skill_from_url("https://github.com/foo/bar.git", Some("my-alias"), None)
+            .unwrap();
         assert_eq!(s.name, "my-alias");
     }
 }

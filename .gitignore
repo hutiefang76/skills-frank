@@ -40,3 +40,6 @@ test-output/
 # AI 工具产物
 .aider*
 .claude/
+
+# Maestro 工作流产物 (本地, 不入仓)
+.workflow/

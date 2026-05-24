@@ -78,7 +78,10 @@ fn config_path() -> Result<PathBuf> {
 fn show() -> Result<()> {
     let path = config_path()?;
     if !path.exists() {
-        crate::log::ui::warn(&format!("{} 不存在 (frank config detect-proxy 自动配)", path.display()));
+        crate::log::ui::warn(&format!(
+            "{} 不存在 (frank config detect-proxy 自动配)",
+            path.display()
+        ));
         return Ok(());
     }
     let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
@@ -89,11 +92,15 @@ fn show() -> Result<()> {
 
 fn set_proxy(url: &str, no: &str) -> Result<()> {
     let url = url.trim();
-    if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("socks5://") {
+    if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("socks5://")
+    {
         anyhow::bail!("proxy URL 必须以 http:// / https:// / socks5:// 开头, 收到: `{url}`");
     }
     write_proxy(url, no)?;
-    crate::log::ui::success(&format!("proxy 写入 {} (http/https/all = {url})", config_path()?.display()));
+    crate::log::ui::success(&format!(
+        "proxy 写入 {} (http/https/all = {url})",
+        config_path()?.display()
+    ));
     crate::log::ui::info("重启 daemon 让新 proxy 生效: brew services restart frank");
     Ok(())
 }
@@ -105,7 +112,9 @@ fn unset_proxy() -> Result<()> {
         return Ok(());
     }
     let text = fs::read_to_string(&path).context("read config.toml")?;
-    let mut v = text.parse::<toml::Value>().unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+    let mut v = text
+        .parse::<toml::Value>()
+        .unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
     if let Some(t) = v.as_table_mut() {
         t.remove("proxy");
     }
@@ -155,14 +164,19 @@ fn detect_proxy() -> Result<()> {
         }
     }
     if found.is_empty() {
-        crate::log::ui::warn("没扫到任何已知代理端口 — 手动配: frank config set-proxy --url http://...");
+        crate::log::ui::warn(
+            "没扫到任何已知代理端口 — 手动配: frank config set-proxy --url http://...",
+        );
         return Ok(());
     }
     let (port, label) = found[0];
     crate::log::ui::info(&format!("选第一个候选: 127.0.0.1:{port} ({label})"));
     let url = format!("http://127.0.0.1:{port}");
     write_proxy(&url, "localhost,127.0.0.1,::1,.local")?;
-    crate::log::ui::success(&format!("proxy 写入 {} (http/https/all = {url})", config_path()?.display()));
+    crate::log::ui::success(&format!(
+        "proxy 写入 {} (http/https/all = {url})",
+        config_path()?.display()
+    ));
     if found.len() > 1 {
         crate::log::ui::info(&format!(
             "(另有 {} 个候选, 想换跑 `frank config set-proxy --url http://127.0.0.1:<port>`)",

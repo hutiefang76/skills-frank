@@ -144,7 +144,18 @@ async fn run_ask(args: AskArgs) -> Result<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null()) // 一问一答不打扰用户, 隐 stderr
         .kill_on_drop(true);
-    strip_empty_api_keys(&mut cmd);
+    // v0.10.4 ADR-009: 5 层 fallback 找凭据 → 注 env. miss 退回 strip_empty 兜底.
+    let cred_report =
+        frank_orchestrator::worker::local::resolve_and_inject_or_strip(&mut cmd, provider);
+    if let Some(r) = &cred_report {
+        // stderr 一行可观测 (用户能看到走哪层 ACL 命中, 零 token 消耗)
+        eprintln!(
+            "[frank-cred] ✓ {} (source: {})",
+            r.env_var.as_deref().unwrap_or("(no-inject)"),
+            r.source
+        );
+    }
+    // 保留 strip_empty 兜底逻辑 (resolve_and_inject_or_strip 内部已调过, 这行去掉)
     frank_orchestrator::worker::local::apply_proxy_config(&mut cmd);
 
     let mut child = cmd
@@ -172,9 +183,7 @@ async fn run_ask(args: AskArgs) -> Result<()> {
         Ok(Ok(status)) if status.success() => {
             let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             let response = buf.trim_end().to_string();
-            let _ = append_history(&HistoryEntry::ok(
-                &args, &raw_prompt, &response, latency_ms,
-            ));
+            let _ = append_history(&HistoryEntry::ok(&args, &raw_prompt, &response, latency_ms));
             // v0.8 自动存: 异步把 (raw_prompt, response) 存 frank-memory, 失败仅 warn
             if !args.no_save {
                 save_to_memory_if_possible(&args, &raw_prompt, &response).await;
@@ -394,8 +403,8 @@ fn run_history(args: HistoryArgs) -> Result<()> {
         crate::log::ui::info("还没有 ai ask 历史 (跑 `frank ai ask --to <p> '...'` 第一次)");
         return Ok(());
     }
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let mut entries: Vec<HistoryEntry> = text
         .lines()
         .filter(|l| !l.trim().is_empty())
@@ -426,7 +435,8 @@ fn run_history(args: HistoryArgs) -> Result<()> {
             .map(|t| format!(" #{t}"))
             .unwrap_or_default();
         let status_icon = if e.status == "ok" { "✓" } else { "✗" };
-        #[allow(clippy::cast_precision_loss)] // latency_ms 大于 2^53 才丢精度, 这里上限 timeout=3600s
+        #[allow(clippy::cast_precision_loss)]
+        // latency_ms 大于 2^53 才丢精度, 这里上限 timeout=3600s
         let latency_s = e.latency_ms as f64 / 1000.0;
         println!(
             "{} {} {} → {} ({:.1}s){}",
@@ -488,20 +498,8 @@ fn invocation(p: CliProvider, model: Option<&str>) -> (&'static str, Vec<String>
     (bin, args)
 }
 
-/// 跟 LocalCliWorker 同款: 清空字符串 API key env, 避免 401 陷阱。
-fn strip_empty_api_keys(cmd: &mut Command) {
-    const SUSPECT: &[&str] = &[
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-    ];
-    for key in SUSPECT {
-        if std::env::var(key).is_ok_and(|v| v.trim().is_empty()) {
-            cmd.env_remove(key);
-        }
-    }
-}
+// v0.10.4 ADR-009: 旧 strip_empty_api_keys 移到 frank_orchestrator::worker::local
+// 的 resolve_and_inject_or_strip, 它内部自动 fallback 到原逻辑。删本地 dead copy。
 
 #[cfg(test)]
 mod tests {

@@ -81,6 +81,7 @@ pub fn run(args: Args) -> Result<()> {
     checks.extend(check_platform_dirs());
     checks.extend(check_state_drift());
     checks.extend(check_local_daemon());
+    checks.extend(check_credentials()); // v0.10.4 ADR-009: 凭据信任链
     if !args.offline {
         checks.extend(check_sync_agent());
     }
@@ -316,6 +317,49 @@ fn check_local_daemon() -> Vec<Check> {
             "daemon",
             "off (CLI 全部命令可用; 想要 Web UI 跑 `brew services start frank`)",
         )],
+    }
+}
+
+/// v0.10.4 ADR-009: 凭据信任链状态 — 对每个 provider 探 5 层 fallback。
+///
+/// 不实际 spawn child, 仅探测能否拿到 token + 显示命中层 + 提示。
+fn check_credentials() -> Vec<Check> {
+    use std::process::Command;
+    let mut out = Vec::new();
+
+    for &provider in frank_cred::Provider::all() {
+        let label = format!("credential: {provider}");
+        // dummy command (不会 spawn) — 只借 resolve_and_inject 探 fallback chain
+        let mut probe = Command::new("true");
+        match frank_cred::resolve_and_inject(&mut probe, provider) {
+            Ok(report) => {
+                let detail = format!("✓ {} ({})", report.source, summarize_inject(&report));
+                out.push(Check {
+                    label,
+                    status: Status::Ok,
+                    detail,
+                });
+            }
+            Err(_) => {
+                out.push(Check {
+                    label,
+                    status: Status::Warn,
+                    detail: format!(
+                        "5 层 fallback 全 miss — 跑 `frank login provider {provider}` 配置"
+                    ),
+                });
+            }
+        }
+    }
+
+    out
+}
+
+fn summarize_inject(r: &frank_cred::InjectReport) -> String {
+    if r.injected_env {
+        format!("inject env: {}", r.env_var.as_deref().unwrap_or("?"))
+    } else {
+        "no env inject (OAuth file mode)".to_string()
     }
 }
 

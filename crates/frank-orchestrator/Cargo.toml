@@ -25,6 +25,10 @@ chrono = { workspace = true }
 # 异步 trait (P0 用 async-trait, 与 frank-memory 保持一致)
 async-trait = "0.1"
 
+# v0.10.4 ADR-009: 跨进程 CLI 凭据桥 (LocalCliWorker 也 spawn 第三方 CLI, 共用 frank-cred)
+# tokio-cmd feature: 让 frank_cred 支持 tokio::process::Command (orphan rule 要求)
+frank-cred = { path = "../frank-cred", features = ["tokio-cmd"] }
+
 # UUID for JobId / StepId
 uuid = { version = "1.23", features = ["v4", "serde"] }
 
