@@ -74,7 +74,9 @@ async fn ensure_registered(headers: &HeaderMap, state: &AppState) -> ApiResult<S
     {
         return Err(ApiError::status(
             StatusCode::UNAUTHORIZED,
-            format!("tenant 未注册. 跑 `frank login` 或 POST /tenant/register (token: {tenant_id}...)"),
+            format!(
+                "tenant 未注册. 跑 `frank login` 或 POST /tenant/register (token: {tenant_id}...)"
+            ),
         ));
     }
     Ok(tenant_id)
@@ -120,6 +122,9 @@ pub fn router(state: AppState) -> Router {
         .route("/tenant/status", get(tenant_status))
         .route("/tenant/request-deletion", post(tenant_request_deletion))
         .route("/tenant/cancel-deletion", post(tenant_cancel_deletion))
+        // ─── v0.13.0 server-side machine-bound token provisioning ───
+        .route("/tenant/provision", post(tenant_provision))
+        .route("/tenant/link-machine", post(tenant_link_machine))
         // ─── 跨设备 skills 同步 (v0.4 — 用户需求 2.3) ───
         .route("/sync/skills/push", post(sync_push))
         .route("/sync/skills/pull", get(sync_pull))
@@ -475,6 +480,86 @@ async fn tenant_cancel_deletion(
         "tenant_id": tenant_id,
         "deletion_scheduled_at": null,
         "status": "cancelled"
+    })))
+}
+
+// ════════════════════════════════════════════════════════════════
+// v0.13.0 server-side token provisioning
+//
+// 流程:
+//   1. 客户端 (frank-cli) 收集 machine fingerprint (hostname / mac / cpu_id 等)
+//   2. POST /tenant/provision 带 fingerprint JSON, **不带 X-Frank-Token** (bootstrap)
+//   3. 服务端: sha256(fp)[:16] = machine_code; 查重 → 生成 32-byte random token
+//      → derive tenant_id → INSERT tenants + machines (事务)
+//   4. 返回 token + tenant_id + machine_code; 客户端存 ~/.frank/.token (chmod 600)
+//   5. 后续请求带 X-Frank-Token: <token>, 走原来的 ensure_registered / quota 路径
+//
+// 跨机场景: 用户在 B 机想用 A 机的 tenant → A 机 cat ~/.frank/.token 给 B,
+//   B 机 POST /tenant/link-machine + X-Frank-Token + fingerprint → 服务端 INSERT machines.
+// ════════════════════════════════════════════════════════════════
+
+#[derive(Deserialize)]
+struct ProvisionRequest {
+    /// 客户端 `MachineFingerprint` 整体 JSON (服务端只 sha256, 不解 schema)
+    fingerprint: serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct ProvisionResponse {
+    /// 服务端生成的 base64url 32-byte token. 客户端存 ~/.frank/.token (chmod 600).
+    /// **只返回一次** — 丢了只能 `frank tenant reset` 拿新 token.
+    token: String,
+    /// `sha256(token)[:12]` hex, 与现有 derive 一致.
+    tenant_id: String,
+    /// `sha256(fingerprint_json)[:16]` hex; 客户端可选存 ~/.frank/.machine_id (info only).
+    machine_code: String,
+    /// 提示文本 (客户端 UI 可显示).
+    note: String,
+}
+
+async fn tenant_provision(
+    State(state): State<AppState>,
+    Json(req): Json<ProvisionRequest>,
+) -> ApiResult<Json<ProvisionResponse>> {
+    // 不需要 X-Frank-Token — 这是 bootstrap (拿 token 的入口).
+    // 防 spam 留 v0.13.1: 同 IP 1 / 15min (caddy rate_limit 也能做).
+    let fp_json = serde_json::to_string(&req.fingerprint).map_err(ApiError::from)?;
+    let result = state
+        .tenants
+        .provision_machine(&fp_json)
+        .await
+        .map_err(|e| ApiError::status(StatusCode::CONFLICT, format!("{e:#}")))?;
+    Ok(Json(ProvisionResponse {
+        token: result.token,
+        tenant_id: result.tenant_id,
+        machine_code: result.machine_code,
+        note: "保存 token 到 ~/.frank/.token (chmod 600), 后续请求带 X-Frank-Token".to_string(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct LinkMachineRequest {
+    /// 当前机器的 fingerprint JSON (与 provision 同形状, 服务端只 sha256).
+    fingerprint: serde_json::Value,
+}
+
+async fn tenant_link_machine(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<LinkMachineRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    // 必须带 X-Frank-Token (= 已有 tenant 的 token), tenant 派生由 token sha256 决定.
+    let tenant_id = ensure_registered(&headers, &state).await?;
+    let fp_json = serde_json::to_string(&req.fingerprint).map_err(ApiError::from)?;
+    let machine_code = state
+        .tenants
+        .link_machine(&tenant_id, &fp_json)
+        .await
+        .map_err(|e| ApiError::status(StatusCode::CONFLICT, format!("{e:#}")))?;
+    Ok(Json(serde_json::json!({
+        "tenant_id": tenant_id,
+        "machine_code": machine_code,
+        "status": "linked",
     })))
 }
 

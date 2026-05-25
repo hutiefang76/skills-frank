@@ -24,6 +24,7 @@ pub mod adapter;
 pub mod cli;
 pub mod installer;
 pub mod log;
+pub mod machine_id;
 pub mod manifest;
 pub mod mcp_inspect;
 pub mod scanner;

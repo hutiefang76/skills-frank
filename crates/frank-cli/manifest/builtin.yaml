@@ -165,13 +165,18 @@ skills:
       ref: main
     visibility: frank-official
 
-  # ── 以下 3 个 skill 仓库还没发布 (404), 留占位等你 push 仓库后启用 ──
+  # v0.12.1: Doris OLAP 运维 — skills-doris repo 真存在 (确认 2026-05-25)
+  # 仓库结构: .claude/skills/doris-ops/SKILL.md (用 subpath 引)
+  - name: doris-ops
+    description: 'Apache Doris OLAP 运维 (查表 / 性能 / 元数据) — Python, demo 走 frank deploy/test-stack/'
+    source:
+      type: git
+      url: https://github.com/hutiefang76/skills-doris.git
+      subpath: .claude/skills/doris-ops
+    visibility: frank-official
+
+  # ── 以下 2 个 skill 仓库还没发布 (404), 留占位等你 push 仓库后启用 ──
   # 启用方法: 把对应 git url 仓库真发到 GitHub, 然后取消下方注释
-  #
-  # - name: doris-ops
-  #   description: TCHouse-D (Doris) 运维 (查表/性能/扩容)
-  #   source: { type: git, url: https://github.com/hutiefang76/skills-doris-ops.git }
-  #   visibility: frank-official
   #
   # - name: feishu-read
   #   description: 飞书文档/表格/Excel/PDF 提取

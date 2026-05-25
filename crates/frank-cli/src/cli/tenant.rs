@@ -9,7 +9,7 @@
 //!
 //! 服务端: `crates/frank-sync-agent/src/routes.rs` 4 个 `/tenant/*` 端点.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use crate::sync_client::SyncClient;
@@ -33,17 +33,71 @@ pub enum TenantCommand {
     Delete,
     /// 取消删除申请.
     CancelDelete,
+    /// v0.13.0: 把这台机器 link 到已有 tenant (多机共享同一 namespace 用).
+    Link,
+    /// v0.13.0: 清掉本地 token + machine_id, 下次跑 provision 拿新 token.
+    /// **谨慎** — 老 tenant 还在服务器, 你失去访问入口 (服务器看, 但 frank cli 不再认它).
+    Reset,
 }
 
 /// 派发器.
 pub fn run(args: Args) -> Result<()> {
-    let client = SyncClient::from_env_or_config()?;
     match args.command {
-        TenantCommand::Register => register(&client),
-        TenantCommand::Status => status(&client),
-        TenantCommand::Delete => request_deletion(&client),
-        TenantCommand::CancelDelete => cancel_deletion(&client),
+        TenantCommand::Reset => reset_token(),
+        cmd => {
+            let client = SyncClient::from_env_or_config()?;
+            match cmd {
+                TenantCommand::Register => register(&client),
+                TenantCommand::Status => status(&client),
+                TenantCommand::Delete => request_deletion(&client),
+                TenantCommand::CancelDelete => cancel_deletion(&client),
+                TenantCommand::Link => link_machine(&client),
+                TenantCommand::Reset => unreachable!(),
+            }
+        }
     }
+}
+
+/// v0.13.0: link 本机 fingerprint 到已有 tenant (X-Frank-Token 是已有 tenant 的).
+fn link_machine(client: &SyncClient) -> Result<()> {
+    let fp = crate::machine_id::collect_fingerprint();
+    let resp = client.tenant_link_machine(&fp)?;
+    let machine_code = resp
+        .get("machine_code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+    let tid = resp
+        .get("tenant_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+    crate::log::ui::success(&format!("已 link 本机到 tenant ({tid})"));
+    crate::log::ui::info(&format!("machine_code = {machine_code}"));
+    // 同时写 .machine_id 本地
+    if let Some(home) = dirs::home_dir() {
+        let _ = std::fs::write(home.join(".frank").join(".machine_id"), machine_code);
+    }
+    Ok(())
+}
+
+/// v0.13.0: 清本地 token + machine_id, 下次跑 frank 触发 provision 拿新 token.
+/// 不调服务端 (老 tenant 留服务器, 用户想真删跑 frank tenant delete 走 14d 流程).
+fn reset_token() -> Result<()> {
+    let home = dirs::home_dir().context("locate home dir")?;
+    let token_path = home.join(".frank").join(".token");
+    let machine_path = home.join(".frank").join(".machine_id");
+    let mut removed = 0;
+    if token_path.exists() {
+        std::fs::remove_file(&token_path)?;
+        removed += 1;
+    }
+    if machine_path.exists() {
+        std::fs::remove_file(&machine_path)?;
+        removed += 1;
+    }
+    crate::log::ui::success(&format!("已清 {removed} 个本地文件 (~/.frank/.token, .machine_id)"));
+    crate::log::ui::warn("注意: 老 tenant 仍在服务器, 数据没动. 真想删跑 `frank tenant delete`.");
+    crate::log::ui::info("下次任何 frank 命令会触发 provision 拿新 token + 新 tenant namespace");
+    Ok(())
 }
 
 fn register(client: &SyncClient) -> Result<()> {

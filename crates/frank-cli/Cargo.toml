@@ -105,6 +105,12 @@ tower-http = { version = "0.6", features = ["cors"] }
 futures-util = "0.3"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 
+# v0.13.0 machine fingerprint: 服务端派生 machine_code 防 spam (1 机器 1 tenant)
+# mac_address — 跨平台拿物理网卡 MAC (mac_address::MacAddressIterator)
+# sysinfo — 跨平台 hostname / OS / CPU / 内存
+mac_address = "1.1"
+sysinfo = "0.39"
+
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"

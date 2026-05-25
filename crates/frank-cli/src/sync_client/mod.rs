@@ -221,6 +221,15 @@ impl SyncClient {
         self.post_json_value("/tenant/cancel-deletion", &serde_json::json!({}))
     }
 
+    /// v0.13.0: POST /tenant/link-machine — 把本机指纹挂到当前 tenant (多机共享).
+    pub fn tenant_link_machine(
+        &self,
+        fingerprint: &crate::machine_id::MachineFingerprint,
+    ) -> Result<serde_json::Value> {
+        let body = serde_json::json!({ "fingerprint": fingerprint });
+        self.post_json_value("/tenant/link-machine", &body)
+    }
+
     /// 内部: POST json -> json (任意 body, 任意返回 schema).
     fn post_json_value(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
         let url = format!("{}{}", self.base_url, path);
@@ -336,51 +345,94 @@ fn resolve_token() -> Option<String> {
     auto_provision_token(&path).ok()
 }
 
-/// v0.12.0: 生成随机 uuid token, 写 `~/.frank/.token` (chmod 600), 调服务端 register.
-/// 失败给清晰提示但 best-effort, 不阻止 cli 继续 (用户可后续手动 frank login).
+/// v0.13.0: 首次启动 — 调服务端 /tenant/provision 拿 server 生成的 token (32 字节 random).
+/// 客户端发机器指纹 (mac/cpu/os) → 服务端哈希成 machine_code (防一机器多 tenant spam).
+/// v0.12.0 老路径 (本地 uuid + /tenant/register) 作为 fallback (服务不可达时).
 fn auto_provision_token(path: &std::path::Path) -> anyhow::Result<String> {
     use anyhow::Context;
-    let token = uuid::Uuid::new_v4().to_string();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create dir {}", parent.display()))?;
     }
-    std::fs::write(path, &token).with_context(|| format!("write {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    crate::log::ui::info("v0.12.0 首次启动: 生成随机 token (~/.frank/.token, chmod 600)");
-
-    // 调 POST /tenant/register (best-effort)
     let base_url = wire::resolve_base_url(wire::config_path().ok().as_deref());
-    let url = format!("{}/tenant/register", base_url.trim_end_matches('/'));
+
+    // v0.13.0 主路径: server-side provision (含 fingerprint 防 spam)
+    if let Ok(token) = try_provision_v013(&base_url, path) {
+        return Ok(token);
+    }
+
+    // Fallback: v0.12.0 本地 uuid + register (如果 server 不支持 provision 或网络断)
+    crate::log::ui::warn("v0.13 provision 不通, 走 v0.12 本地 uuid + register 兜底");
+    let token = uuid::Uuid::new_v4().to_string();
+    std::fs::write(path, &token).with_context(|| format!("write {}", path.display()))?;
+    set_token_perms(path);
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .ok();
     if let Some(client) = client {
-        match client
-            .post(&url)
+        let _ = client
+            .post(format!("{}/tenant/register", base_url.trim_end_matches('/')))
             .header("X-Frank-Token", &token)
             .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-        {
-            Ok(_) => {
-                crate::log::ui::success(&format!(
-                    "已注册到 {base_url} (独立 tenant namespace, 任何写入都隔离)"
-                ));
-            }
-            Err(e) => {
-                crate::log::ui::warn(&format!(
-                    "tenant 注册失败 (网络? 服务不可达?): {e}. 跑 `frank tenant register` 手动重试"
-                ));
-            }
-        }
+            .and_then(reqwest::blocking::Response::error_for_status);
     }
     Ok(token)
 }
+
+/// v0.13.0: 调 POST /tenant/provision, 服务端生成 token 返回, 客户端写盘 + chmod.
+fn try_provision_v013(base_url: &str, token_path: &std::path::Path) -> anyhow::Result<String> {
+    use anyhow::Context;
+    let fp = crate::machine_id::collect_fingerprint();
+    let body = serde_json::json!({ "fingerprint": fp });
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .context("build reqwest")?;
+    let resp = client
+        .post(format!("{}/tenant/provision", base_url.trim_end_matches('/')))
+        .json(&body)
+        .send()
+        .context("POST /tenant/provision")?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().unwrap_or_default();
+        anyhow::bail!("provision HTTP {status}: {text}");
+    }
+    let json: serde_json::Value = resp.json().context("parse provision response")?;
+    let token = json
+        .get("token")
+        .and_then(serde_json::Value::as_str)
+        .context("provision response missing token field")?
+        .to_string();
+    let machine_code = json
+        .get("machine_code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+
+    std::fs::write(token_path, &token)
+        .with_context(|| format!("write {}", token_path.display()))?;
+    set_token_perms(token_path);
+    // 同时写 .machine_id (info only, 用户能查看自己的 machine_code)
+    if let Some(parent) = token_path.parent() {
+        let _ = std::fs::write(parent.join(".machine_id"), machine_code);
+    }
+
+    crate::log::ui::success(&format!(
+        "v0.13.0 首次启动: server provision OK (machine_code={machine_code}, token chmod 600 已写盘)"
+    ));
+    crate::log::ui::info(&format!("基地址: {base_url} | 跑 `frank tenant status` 看 quota"));
+    Ok(token)
+}
+
+#[cfg(unix)]
+fn set_token_perms(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn set_token_perms(_path: &std::path::Path) {}
 
 #[cfg(test)]
 mod tests {

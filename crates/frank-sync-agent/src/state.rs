@@ -128,8 +128,8 @@ impl AppState {
         let memory = Memory::new(cfg).await.context("init Memory")?;
 
         // v0.12.0: 初始化 tenant SQLite. 默认 /var/lib/frank/tenants.db (容器 volume).
-        let tenant_db = env::var("FRANK_TENANT_DB")
-            .unwrap_or_else(|_| "/var/lib/frank/tenants.db".to_string());
+        let tenant_db =
+            env::var("FRANK_TENANT_DB").unwrap_or_else(|_| "/var/lib/frank/tenants.db".to_string());
         tracing::info!(%tenant_db, "init tenant SQLite");
         let tenants = TenantStore::open(&tenant_db)
             .await
