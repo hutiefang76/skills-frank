@@ -45,7 +45,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write    # v0.10.11: 上传 docker tar.gz 到 GitHub Release 需 write
       packages: write    # 推 ghcr.io
 
     steps:
