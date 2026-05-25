@@ -154,6 +154,10 @@ pub fn run(args: Args) -> Result<()> {
         elapsed.as_secs_f64(),
     ));
 
+    // v0.10.6 P2 D4: 静默生成 ~/.frank/claude-template.md (dormant artifact, Phase 3 hook 真用).
+    // 不打印任何用户面消息 (是设计 — 详见 cli/claude_template.rs 模块文档).
+    crate::cli::claude_template::ensure_claude_template_silent();
+
     Ok(())
 }
 

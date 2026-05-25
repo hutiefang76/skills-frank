@@ -17,6 +17,7 @@ use clap::{Parser, Subcommand};
 // 各子命令模块声明 (P0 day3-4: install / uninstall / enable / disable / list 已落地)
 pub mod ai;
 pub mod cache;
+pub mod claude_template;
 pub mod config;
 pub mod daemon;
 pub mod dedupe;
