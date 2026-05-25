@@ -80,7 +80,7 @@ impl SkillTemplate {
         format!(
             r#"---
 name: {skill_name}
-description: '把当前用户问题原话转发给本机 {provider} CLI 的 `{model}` 模型, 拿回答原样返回. 触发: 用户输入 "/{skill_name} <prompt>" 或 "用 {model} 看下 ..." 等明确指定要 {provider}/{model} 回答的话.'
+description: '用 {provider} 的 {model} 模型回答。'
 ---
 
 # {skill_name}
@@ -284,8 +284,8 @@ mod tests {
         // 触发命令含正确 provider + model
         assert!(s.contains("--to claude"));
         assert!(s.contains("--model haiku"));
-        // 大白话说明
-        assert!(s.contains("把当前用户问题原话转发给本机 claude CLI 的 `haiku` 模型"));
+        // v0.10.9: 简化版 description (旧版字太多 UI 截断)
+        assert!(s.contains("用 claude 的 haiku 模型回答"));
     }
 
     #[test]

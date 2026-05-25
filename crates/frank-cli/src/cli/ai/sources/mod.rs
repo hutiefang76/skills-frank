@@ -140,10 +140,10 @@ pub fn collect_user_models(provider: &str) -> Vec<ModelEntry> {
     // 路 2: env vars (provider → env var 名映射, 详见 env::read_for)
     out.extend(env::read_for(provider));
 
-    // 路 3: 兜底 — 仅当前 2 路全空才显示 alias (避免给用户配过的清单再塞默认)
-    if out.is_empty() {
-        out.extend(builtin_aliases(provider));
-    }
+    // 路 3: alias 总是加 — 用户配的 + 内置兜底 model 都能列
+    // (v0.10.9 修: v0.10.8 是 "前2路全空才加 alias", 导致用户配 haiku 后
+    // 内置的 sonnet/opus 被吞。改为总加,去重时同名按优先级保 ConfigFile)
+    out.extend(builtin_aliases(provider));
 
     out
 }
