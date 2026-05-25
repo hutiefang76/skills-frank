@@ -182,7 +182,18 @@ async fn run_ask(args: AskArgs) -> Result<()> {
     {
         Ok(Ok(status)) if status.success() => {
             let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-            let response = buf.trim_end().to_string();
+            // v0.10.5: claude/codex 走 JSON 解析提 token+cost; gemini/opencode 直走 raw.
+            let (parsed_reply, call_report) = extract_reply_and_report(
+                provider,
+                &buf,
+                latency_ms,
+                args.model.as_deref().unwrap_or(""),
+            );
+            let response = parsed_reply.trim_end().to_string();
+            // 解析成功 → 一行 stderr 可观测 (跟 [frank-cred] 行并排)
+            if let Some(r) = call_report {
+                eprintln!("{}", r.render_oneline());
+            }
             let _ = append_history(&HistoryEntry::ok(&args, &raw_prompt, &response, latency_ms));
             // v0.8 自动存: 异步把 (raw_prompt, response) 存 frank-memory, 失败仅 warn
             if !args.no_save {
@@ -475,11 +486,20 @@ fn parse_provider(s: &str) -> Result<CliProvider> {
 /// 每家 CLI 的"非交互一问一答"调用方式. 可选 model 通过 --model 注入.
 ///
 /// 注: 这里**只用** 进入非交互模式必需的最小 flag. 用户传 --model 时按各家官方语法注入.
+///
+/// v0.10.5 (Phase 1): claude/codex 额外加 JSON 输出 flag (`--output-format json` /
+/// `--json`), 用于 ai_report 解析 token + cost + session. gemini/opencode 暂不动
+/// (TODO v0.11+).
 fn invocation(p: CliProvider, model: Option<&str>) -> (&'static str, Vec<String>) {
     // 返回 Vec<String> (不再 &'static) 因为 model 是运行时值.
     let mut args: Vec<String> = match p {
-        CliProvider::Claude => vec!["--print".into()],
-        CliProvider::Codex => vec!["exec".into(), "--skip-git-repo-check".into(), "-".into()],
+        CliProvider::Claude => vec!["--print".into(), "--output-format".into(), "json".into()],
+        CliProvider::Codex => vec![
+            "exec".into(),
+            "--json".into(),
+            "--skip-git-repo-check".into(),
+            "-".into(),
+        ],
         CliProvider::Opencode => vec!["run".into(), "-".into()],
         CliProvider::Gemini => vec!["--prompt".into(), "-".into()],
     };
@@ -501,6 +521,29 @@ fn invocation(p: CliProvider, model: Option<&str>) -> (&'static str, Vec<String>
 // v0.10.4 ADR-009: 旧 strip_empty_api_keys 移到 frank_orchestrator::worker::local
 // 的 resolve_and_inject_or_strip, 它内部自动 fallback 到原逻辑。删本地 dead copy。
 
+/// 按 provider 路由到对应 parser 抽 reply 文本 + 构造 CallReport.
+///
+/// - `Claude` → `ai_report::parse_claude_json` (claude --output-format json)
+/// - `Codex` → `ai_report::parse_codex_jsonl` (codex --json, model_hint 取自 --model)
+/// - `Gemini` / `Opencode` → 直返 raw, 无 report (TODO v0.11+ 加 parser)
+///
+/// 任何 parser 失败 → fallback raw stdout 当 reply, `report = None`, 永不阻塞用户拿回答.
+fn extract_reply_and_report(
+    provider: CliProvider,
+    raw_stdout: &str,
+    latency_ms: u64,
+    model_hint: &str,
+) -> (String, Option<frank_cred::CallReport>) {
+    match provider {
+        CliProvider::Claude => super::ai_report::parse_claude_json(raw_stdout, latency_ms),
+        CliProvider::Codex => {
+            super::ai_report::parse_codex_jsonl(raw_stdout, latency_ms, model_hint)
+        }
+        // TODO v0.11+: gemini/opencode token parsing — 当前 fallback 仅返 raw, 无 report.
+        CliProvider::Gemini | CliProvider::Opencode => (raw_stdout.to_string(), None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,16 +563,29 @@ mod tests {
     }
 
     #[test]
-    fn invocation_uses_minimal_flags() {
+    fn invocation_claude_uses_json_output() {
+        // v0.10.5: claude 加 `--output-format json` 给 ai_report parser 用
         let (bin, args) = invocation(CliProvider::Claude, None);
         assert_eq!(bin, "claude");
-        assert_eq!(args, vec!["--print"]);
+        assert_eq!(args, vec!["--print", "--output-format", "json"]);
+    }
+
+    #[test]
+    fn invocation_codex_uses_json_jsonl() {
+        // v0.10.5: codex 加 `--json` 输出 JSONL 流
+        let (bin, args) = invocation(CliProvider::Codex, None);
+        assert_eq!(bin, "codex");
+        assert_eq!(args, vec!["exec", "--json", "--skip-git-repo-check", "-"]);
     }
 
     #[test]
     fn invocation_injects_model_when_given() {
         let (bin, args) = invocation(CliProvider::Claude, Some("haiku"));
         assert_eq!(bin, "claude");
-        assert_eq!(args, vec!["--model", "haiku", "--print"]);
+        // --model 注入在已有 args 之前
+        assert_eq!(
+            args,
+            vec!["--model", "haiku", "--print", "--output-format", "json"]
+        );
     }
 }
