@@ -148,7 +148,7 @@ TEXT TO ANALYZE:\n{content}\n\nJSON OUTPUT:"
         .args(&cli_args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped()) // v0.11.1: 不再吞 stderr, 失败时给用户线索
         .spawn()
         .with_context(|| format!("spawn `{bin}`"))?;
     use std::io::Write as _;
@@ -162,9 +162,15 @@ TEXT TO ANALYZE:\n{content}\n\nJSON OUTPUT:"
         .wait_with_output()
         .with_context(|| format!("wait `{bin}`"))?;
     if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         anyhow::bail!(
-            "`{bin}` exit {} during fact extract",
-            out.status.code().unwrap_or(-1)
+            "`{bin}` exit {} during fact extract\n--- stderr ---\n{}\n--- stdout ---\n{}\n----------\n\
+            建议: 1) 跑 `{bin} --print 'hi'` 验证 cli 能用; 2) 试 `frank memory add --extract-with=none` \
+            跳过客户端抽走服务端; 3) 试别的 cli `--extract-with=codex` / `=gemini`",
+            out.status.code().unwrap_or(-1),
+            if stderr.trim().is_empty() { "(empty)".to_string() } else { stderr.trim().to_string() },
+            if stdout.trim().is_empty() { "(empty)".to_string() } else { stdout.trim().to_string() },
         );
     }
     let raw = String::from_utf8_lossy(&out.stdout).to_string();

@@ -53,16 +53,24 @@ http://frank.hutiefang.com:8318, http://101.35.227.232:8318, :8317 {
     reverse_proxy sync-agent:3000
   }
 
-  # 受保护路由: 必须带 X-Frank-Token, 否则 401
+  # v0.11.1: 受保护路由 — 接受**任意非空** X-Frank-Token.
+  # 服务端 (frank-sync-agent) 把 token 哈希成 tenant_id 隔离数据 — 不同 token 自动不同
+  # 命名空间, 用户首次跑 `frank login --new` 拿到独立 token 就有私有 namespace.
+  # 老的共享 FRANK_API_TOKEN 仍然 work, 但所有用它的人共享"demo 租户" (数据混在一起).
   handle @sync_protected {
-    @authorized header X-Frank-Token "{$FRANK_API_TOKEN}"
-    handle @authorized {
+    @has_token {
+      header_regexp token X-Frank-Token .+
+    }
+    handle @has_token {
       reverse_proxy sync-agent:3000
     }
-    respond "missing or invalid X-Frank-Token header" 401
+    respond "missing X-Frank-Token header (任意非空字符串都行, 服务端 sha256 派生 tenant_id)" 401
   }
 
-  # Qdrant 管理 / API (Path strip: /qdrant/foo → /foo). 同样要 token (含数据库写权限!)
+  # Qdrant 管理 / API (Path strip: /qdrant/foo → /foo).
+  # qdrant 直连危险 (能跨 tenant 看数据), v0.11.1 起仍用 exact-match FRANK_API_TOKEN 作为
+  # admin 钥匙 (跟 memory 的"任意非空"区分). 只有持有 host /opt/frank/.secrets/api_token 的人
+  # 能直访 qdrant, 普通用户走 sync-agent 间接.
   handle /qdrant/* {
     @qdrant_authorized header X-Frank-Token "{$FRANK_API_TOKEN}"
     handle @qdrant_authorized {
@@ -70,7 +78,7 @@ http://frank.hutiefang.com:8318, http://101.35.227.232:8318, :8317 {
         reverse_proxy qdrant:6333
       }
     }
-    respond "missing or invalid X-Frank-Token header" 401
+    respond "missing or invalid X-Frank-Token header (qdrant admin 需要 exact FRANK_API_TOKEN)" 401
   }
 
   # 默认 placeholder (后续放 orchestrator web SPA)

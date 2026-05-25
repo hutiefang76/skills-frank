@@ -21,14 +21,44 @@
 //! ```
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use frank_memory::{MemoryId, MemoryMatch, MemoryRecord, Scope, SearchOpts};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;
+
+/// v0.11.1 用户隔离: 从 X-Frank-Token 派生 tenant_id (12 hex 字符 = 48 bit,
+/// 生日攻击碰撞门槛 ~16M 用户, 单机部署绰绰有余).
+///
+/// **作用**:
+/// - 所有 memory add/search/list/delete 操作前, 服务端用此覆盖 scope.user_id
+/// - 不同 token (e.g. `frank login --new` 生成的随机 uuid) → 不同 tenant
+/// - 老的共享 FRANK_API_TOKEN → 共享"demo" tenant (数据公开混在一起)
+///
+/// **限制**: 不防恶意 (用户可以伪造任意 token), 只防"无意泄漏"和"普通隔离".
+/// 真正的多用户安全要做 OAuth / mTLS, 留 v0.13+.
+fn tenant_id_from_headers(headers: &HeaderMap) -> String {
+    let token = headers
+        .get("X-Frank-Token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("anonymous");
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    let digest = hasher.finalize();
+    hex::encode(&digest[..6])
+}
+
+/// 把 server 派生的 tenant_id 强制注入 scope.user_id, 覆盖客户端任何传值.
+/// agent_id / session_id 保留客户端控制.
+fn inject_tenant(headers: &HeaderMap, mut scope: Scope) -> Scope {
+    let tenant = tenant_id_from_headers(headers);
+    scope.user_id = Some(format!("t_{tenant}"));
+    scope
+}
 
 /// 顶层 router 构造。
 pub fn router(state: AppState) -> Router {
@@ -69,11 +99,13 @@ struct AddResponse {
 
 async fn memory_add(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<AddRequest>,
 ) -> ApiResult<Json<AddResponse>> {
+    let scope = inject_tenant(&headers, req.scope);
     let ids = state
         .memory
-        .add(&req.content, req.scope, req.metadata)
+        .add(&req.content, scope, req.metadata)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(AddResponse { ids }))
@@ -95,11 +127,13 @@ struct AddRawResponse {
 
 async fn memory_add_raw(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<AddRawRequest>,
 ) -> ApiResult<Json<AddRawResponse>> {
+    let scope = inject_tenant(&headers, req.scope);
     let id = state
         .memory
-        .add_raw(&req.fact, req.scope, req.metadata)
+        .add_raw(&req.fact, scope, req.metadata)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(AddRawResponse { id }))
@@ -124,8 +158,10 @@ struct SearchResponse {
 
 async fn memory_search(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<SearchRequest>,
 ) -> ApiResult<Json<SearchResponse>> {
+    let scope = inject_tenant(&headers, req.scope);
     let mut opts = SearchOpts::default();
     if let Some(l) = req.limit {
         opts.limit = l;
@@ -135,7 +171,7 @@ async fn memory_search(
     }
     let matches = state
         .memory
-        .search(&req.query, req.scope, opts)
+        .search(&req.query, scope, opts)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(SearchResponse { matches }))
@@ -161,11 +197,13 @@ struct ListResponse {
 
 async fn memory_list(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<ListRequest>,
 ) -> ApiResult<Json<ListResponse>> {
+    let scope = inject_tenant(&headers, req.scope);
     let records = state
         .memory
-        .list(req.scope, req.limit)
+        .list(scope, req.limit)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(ListResponse { records }))

@@ -46,5 +46,9 @@ fastembed = { version = "5.13", default-features = false, features = [
 # block_on 给 fastembed sync API 用 (单实例 async embed 不能跨 spawn_blocking)
 futures = "0.3"
 
+# v0.11.1 用户隔离: X-Frank-Token → sha256 → tenant_id 派生 (48-bit hex), 服务端注入 Scope
+sha2 = { workspace = true }
+hex = "0.4"
+
 [lints]
 workspace = true

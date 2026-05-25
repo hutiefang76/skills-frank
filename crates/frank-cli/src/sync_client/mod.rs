@@ -254,13 +254,14 @@ fn print_demo_warning_once() {
             }
         }
     }
-    crate::log::ui::warn("当前连接公共 demo 服务器 frank.hutiefang.com");
-    crate::log::ui::info("  ⚠️  v0.10.10 暂未做用户隔离, 数据混在同一库, 仅 demo 用");
-    crate::log::ui::info("  隐私敏感请自建:");
+    crate::log::ui::warn("当前连接公共 server frank.hutiefang.com");
+    crate::log::ui::info("  v0.11.1 起服务端按 X-Frank-Token 派生独立 tenant — 不同 token 数据互不可见");
+    crate::log::ui::info("  你当前 token 决定 tenant 命名空间; 改 token 即换私有 namespace:");
+    crate::log::ui::info("    frank login --token <你的随机 token>     # 任意非空字符串");
+    crate::log::ui::info("  或自建 server (完全离线 / 自管):");
     crate::log::ui::info("    curl -sSL https://raw.githubusercontent.com/hutiefang76/skills-frank/main/deploy/install-server.sh | bash");
-    crate::log::ui::info("  已自建请配置:");
     crate::log::ui::info("    frank config set sync.agent_url http://<your-server>:8318");
-    crate::log::ui::info("  不再提醒 (接受 demo 模式):");
+    crate::log::ui::info("  不再提醒 (确认已配私有 token):");
     crate::log::ui::info("    frank config set sync.demo_acknowledged true");
     eprintln!();
 }
