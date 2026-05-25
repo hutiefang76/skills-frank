@@ -1,6 +1,76 @@
-# frank-stack 服务端部署 (tx:8317)
+# frank-stack 服务端部署
 
-服务端栈用 Docker Compose 编排, 跑在腾讯云 VM `tx` 上, 唯一对外端口 `8317`。
+服务端栈用 Docker Compose 编排. 项目作者本人跑在腾讯云 VM `tx:8318` (=外网公共 demo
+server `frank.hutiefang.com`). 任何用户也可在自己机器一键自建.
+
+## 一键自建 (v0.10.10 新, Linux only)
+
+**最快路径** — 一行命令搞定 (Mac/Windows 后续支持):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/hutiefang76/skills-frank/main/deploy/install-server.sh | bash
+```
+
+脚本做的事:
+
+1. 检查 docker / docker compose
+2. 创建 `/opt/frank` (可用 `FRANK_HOME=/data/frank` 覆盖)
+3. 下载 `docker-compose.yml` + `Caddyfile` + `scripts/init-models.sh`
+4. **下 BGE-small ONNX 模型 (~250MB) 到 `/opt/frank/models`** — 一次性
+5. 生成随机 API token, 写到 `/opt/frank/.secrets/api_token`
+6. `docker compose up -d` 起 qdrant + sync-agent + caddy
+7. 输出客户端配置命令
+
+完成后客户端配:
+
+```bash
+frank config set sync.agent_url http://<your-host>:8318
+frank login --token <api-token>      # token 在 /opt/frank/.secrets/api_token
+```
+
+## 为什么模型要单独下
+
+v0.10.10 把 ONNX 模型从 docker image 移到 host volume:
+
+| | v0.10.9 及之前 | v0.10.10 起 |
+|---|---|---|
+| 镜像大小 | 572MB | ~80MB |
+| 首次部署 | docker pull 5-30min (国内常 timeout) | docker pull 30s + 下模型 2-10min |
+| 升级 | 每次 pull 572MB | 每次 pull 80MB |
+| CI build | 8min (含模型预下) | 3min |
+
+模型从 `hf-mirror.com` (HuggingFace 国内镜像) 下, 解决国内连 HF 不稳的问题.
+
+## 手动自建 (不用脚本)
+
+```bash
+# 1. 准备目录 (Linux/Mac)
+sudo mkdir -p /opt/frank && sudo chown -R $(id -u):$(id -g) /opt/frank
+cd /opt/frank
+
+# 2. 下配置文件
+curl -O https://raw.githubusercontent.com/hutiefang76/skills-frank/main/deploy/docker-compose.yml
+curl -O https://raw.githubusercontent.com/hutiefang76/skills-frank/main/deploy/Caddyfile
+mkdir -p scripts && curl -o scripts/init-models.sh \
+    https://raw.githubusercontent.com/hutiefang76/skills-frank/main/deploy/scripts/init-models.sh
+chmod +x scripts/init-models.sh
+
+# 3. 下模型 (一次性, ~250MB)
+bash scripts/init-models.sh
+
+# 4. 生成 API token + .env
+mkdir -p .secrets
+head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=' > .secrets/api_token
+chmod 600 .secrets/api_token
+echo "FRANK_API_TOKEN=$(cat .secrets/api_token)" > .env
+
+# 5. 启动
+docker compose up -d
+```
+
+---
+
+## 项目作者的 tx 部署 (历史)
 
 ## 当前架构
 

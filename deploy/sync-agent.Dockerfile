@@ -89,11 +89,12 @@ RUN apt-get update \
 # 二进制放到 PATH; debian:trixie-slim 自带 nobody:65534
 COPY --from=builder /workspace/target/release/frank-sync-agent /usr/local/bin/frank-sync-agent
 
-# v0.8.1: fastembed cache 路径走显式 FASTEMBED_CACHE_DIR env, 不依赖 PWD/HOME.
-# 模型在 GH Actions runner 预下载好 (国外 runner 通 HuggingFace), COPY 进镜像 →
-# runtime 不联网, 绕开 tx 在国内连 HF 不稳的问题 (hf-mirror.com 缺 Content-Range).
+# v0.10.10: 模型不再 COPY 进镜像, 改为 volume 挂载 (镜像 572MB → ~80MB).
+# 部署侧 docker-compose 把 host /opt/frank/models 挂到 /home/nobody/.cache/huggingface,
+# 首次部署用 deploy/scripts/init-models.sh 在 host 下好模型, 之后所有 docker pull 只拉 binary.
+# 历史背景 (v0.8.1): 原方案是 GH Actions runner 预下 + COPY, 解决 tx 连 HF 不稳;
+# v0.10.10 改 volume 后 init-models.sh 也走 hf-mirror.com 国内镜像, 同样绕开 GFW.
 RUN mkdir -p /home/nobody/.cache/huggingface && chown -R nobody:nogroup /home/nobody
-COPY --chown=nobody:nogroup hf-cache/ /home/nobody/.cache/huggingface/
 ENV HOME=/home/nobody
 ENV FASTEMBED_CACHE_DIR=/home/nobody/.cache/huggingface/hub
 # 注意: hf-cli (python) 写到 $HF_HOME/hub/models--...; 但 hf-hub crate 通过 ApiBuilder.with_cache_dir

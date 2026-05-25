@@ -47,18 +47,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # v0.8.1: 预下载 fastembed BAAI/bge-small-en-v1.5 ONNX 模型到 hf-hub cache.
-      # 后续 docker build COPY 进 runtime image, runtime 不再联网下载.
-      # 解决 tx 在国内连 HuggingFace 不稳 (hf-mirror.com 不返 Content-Range header 导致 partial download fail).
-      - name: Pre-download fastembed model (HF cache layout)
-        run: |
-          python3 -m pip install --user --quiet huggingface_hub
-          mkdir -p ./hf-cache
-          export PATH="$HOME/.local/bin:$PATH"
-          HF_HOME=$PWD/hf-cache hf download Xenova/bge-small-en-v1.5
-          echo "--- cache size ---"
-          du -sh ./hf-cache
-          ls ./hf-cache/hub/models--Xenova--bge-small-en-v1.5/snapshots/*/
+      # v0.10.10: 模型从镜像移到 host volume, CI 不再预下 (省 ~250MB build context + 1-2min CI).
+      # tx 上首次部署跑 deploy/scripts/init-models.sh 把模型下到 /opt/frank/models.
+      # 之前 (v0.8.1 - v0.10.9) 把模型 COPY 进 image, 镜像 572MB, tx pull 经常 timeout.
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

@@ -31,6 +31,15 @@ volumes:
     driver: local
   caddy-config:
     driver: local
+  # v0.10.10: 模型从 host 挂入 sync-agent. host 路径 /opt/frank/models 由
+  # deploy/scripts/init-models.sh 一次性下好 (~250MB BGE-small ONNX 权重).
+  # 用 bind mount (driver_opts.type=none) 而非 named volume, 方便 host 直接看/管.
+  sync-agent-models:
+    driver: local
+    driver_opts:
+      type: none
+      device: /opt/frank/models
+      o: bind
 
 services:
   qdrant:
@@ -64,11 +73,15 @@ services:
     #     --output type=docker,dest=/tmp/frank-sync-agent.tar .
     # v0.8: bump 0.1.0 → 0.8.0, mock 模式默认关 (LocalEmbedder fastembed 384d + Mock 行拆 extractor).
     # 详见 ADR-003: 默认零 token, 不需要 OPENAI/ANTHROPIC key 也能跑.
-    image: frank-sync-agent:0.8.0
+    # v0.10.10: 从 ghcr.io 拉瘦身镜像 (80MB, 模型走 volume). tx 上跑 docker compose pull.
+    image: ghcr.io/hutiefang76/frank-sync-agent:v0.10.10
     container_name: frank-sync-agent
     restart: unless-stopped
     expose:
       - "3000"
+    volumes:
+      # v0.10.10: 模型 host bind mount; 部署前必须先跑 deploy/scripts/init-models.sh
+      - sync-agent-models:/home/nobody/.cache/huggingface
     environment:
       FRANK_BIND_ADDR: 0.0.0.0:3000
       FRANK_QDRANT_URL: http://qdrant:6334

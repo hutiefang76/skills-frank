@@ -70,8 +70,16 @@ impl SyncClient {
     /// Token 来源 (按优先级):
     /// 1. 环境变量 `FRANK_API_TOKEN`
     /// 2. `~/.frank/.token` 文件 (单行明文, 600 权限推荐)
+    ///
+    /// v0.10.10: 如果落到默认公共 server (`frank.hutiefang.com`), 首次会打 demo
+    /// 模式 warning, 提示用户数据未严格隔离. 后续 v0.11 加用户隔离后撤掉.
     pub fn from_env_or_config() -> Result<Self> {
-        let mut client = Self::new(resolve_base_url(config_path().ok().as_deref()))?;
+        let base = resolve_base_url(config_path().ok().as_deref());
+        // demo warning — 仅在用默认公共 server 时打, 每进程一次
+        if base.trim_end_matches('/') == DEFAULT_BASE_URL.trim_end_matches('/') {
+            print_demo_warning_once();
+        }
+        let mut client = Self::new(base)?;
         if let Some(t) = resolve_token() {
             client = client.with_token(t);
         }
@@ -218,6 +226,43 @@ impl SyncClient {
         }
         serde_json::from_str(&text).with_context(|| format!("decode response from {path}"))
     }
+}
+
+/// v0.10.10: 默认公共 server demo 模式 warning. 每进程只打一次, 用 OnceLock 守.
+/// 通过 `FRANK_SUPPRESS_DEMO_WARN=1` 或 config `sync.demo_acknowledged = true` 抑制.
+fn print_demo_warning_once() {
+    use std::sync::OnceLock;
+    static WARNED: OnceLock<()> = OnceLock::new();
+    if WARNED.set(()).is_err() {
+        return;
+    }
+    // env 抑制
+    if std::env::var("FRANK_SUPPRESS_DEMO_WARN").ok().as_deref() == Some("1") {
+        return;
+    }
+    // config 抑制 (sync.demo_acknowledged = true; 支持 bool 和字符串 "true")
+    if let Ok(path) = config_path() {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Ok(v) = text.parse::<toml::Value>() {
+                if let Some(val) = v.get("sync").and_then(|s| s.get("demo_acknowledged")) {
+                    let is_true = val.as_bool() == Some(true)
+                        || val.as_str().is_some_and(|s| s.eq_ignore_ascii_case("true"));
+                    if is_true {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    crate::log::ui::warn("当前连接公共 demo 服务器 frank.hutiefang.com");
+    crate::log::ui::info("  ⚠️  v0.10.10 暂未做用户隔离, 数据混在同一库, 仅 demo 用");
+    crate::log::ui::info("  隐私敏感请自建:");
+    crate::log::ui::info("    curl -sSL https://raw.githubusercontent.com/hutiefang76/skills-frank/main/deploy/install-server.sh | bash");
+    crate::log::ui::info("  已自建请配置:");
+    crate::log::ui::info("    frank config set sync.agent_url http://<your-server>:8318");
+    crate::log::ui::info("  不再提醒 (接受 demo 模式):");
+    crate::log::ui::info("    frank config set sync.demo_acknowledged true");
+    eprintln!();
 }
 
 /// Token 解析: env `FRANK_API_TOKEN` → `~/.frank/.token` 文件。
