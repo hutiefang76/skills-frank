@@ -53,9 +53,25 @@ pub fn run_add(client: &SyncClient, args: AddArgs) -> Result<()> {
     }
     let metadata = parse_metadata(args.metadata)?;
 
-    // v0.8: 客户端抽 fact 模式 (--extract-with claude/codex)
-    let extract = args.extract_with.trim().to_lowercase();
+    // v0.11 E: --extract-with 默认 auto, 自动选可用 cli; none 显式禁用 (走服务端抽).
+    let raw_extract = args.extract_with.trim().to_lowercase();
+    let extract = if raw_extract == "auto" {
+        // 优先级: FRANK_AI_PROVIDER env > claude > codex > gemini > none
+        if let Ok(env_provider) = std::env::var("FRANK_AI_PROVIDER") {
+            let p = env_provider.trim().to_lowercase();
+            if !p.is_empty() && which::which(&p).is_ok() {
+                p
+            } else {
+                detect_first_available_cli().unwrap_or_else(|| "none".to_string())
+            }
+        } else {
+            detect_first_available_cli().unwrap_or_else(|| "none".to_string())
+        }
+    } else {
+        raw_extract
+    };
     if extract != "none" && !extract.is_empty() {
+        crate::log::ui::info(&format!("extractor: {extract} (set --extract-with=none to disable)"));
         let facts = extract_facts_via_cli(&extract, &args.content)?;
         if facts.is_empty() {
             crate::log::ui::warn("extract returned 0 facts; nothing stored");
@@ -94,6 +110,19 @@ pub fn run_add(client: &SyncClient, args: AddArgs) -> Result<()> {
 ///
 /// prompt 模板借 mem0 (Apache 2.0): 强 JSON schema, 每条短句独立可 embed.
 /// 调 cli 用各家 `--print` / `exec` 非交互 flag (跟 `frank ai ask` 一致).
+/// v0.11 E: 探用户本机第一个可用的 cli (按优先级).
+///
+/// 优先级排序参考 POSITION.md #2 (用用户当前 AI) — Claude 优先, codex/gemini 退而求其次.
+/// 返回 None 表示全没装, 调用方应 fallback "none" (走服务端抽).
+fn detect_first_available_cli() -> Option<String> {
+    for candidate in ["claude", "codex", "gemini"] {
+        if which::which(candidate).is_ok() {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
 fn extract_facts_via_cli(cli: &str, content: &str) -> Result<Vec<String>> {
     use std::process::Command;
     let (bin, cli_args): (&str, Vec<&str>) = match cli {

@@ -25,6 +25,7 @@ pub mod dedupe;
 pub mod disable;
 pub mod doctor;
 pub mod enable;
+pub mod hook;
 pub mod import;
 pub mod install;
 pub mod list;
@@ -139,6 +140,9 @@ enum Commands {
 
     /// 按用户配的 model 自动生成 slash command skill (`frank refresh-skills`).
     RefreshSkills(refresh_skills::Args),
+
+    /// Claude Code PostToolUse hook 桥接 — 截 mcp__memory__* 转发到 frank-memory (v0.11 H).
+    Hook(hook::Args),
 }
 
 /// CLI 入口 dispatcher。
@@ -185,6 +189,7 @@ pub fn run() -> Result<()> {
         Commands::Update(args) => update::run(args),
         Commands::Rollback => stub("rollback"),
         Commands::RefreshSkills(args) => refresh_skills::run(args),
+        Commands::Hook(args) => hook::run(args),
     }
 }
 

@@ -64,9 +64,10 @@ pub struct AddArgs {
     pub metadata: Option<String>,
 
     /// v0.8: 客户端抽事实模式 — 调本机 cli 把 content 拆成多条独立 fact, 然后逐条 add_raw 入库.
-    /// 选项: `claude` / `codex` / `none` (默认 none = 服务端抽 / 直存原文)。
+    /// 选项: `auto` (v0.11 默认, 自动选可用 cli) / `claude` / `codex` / `gemini` / `none` (服务端抽).
     /// 借 mem0 抽 prompt 模板, 用户本机已登录 cli 复用 → 零额外 token 费.
-    #[arg(long, default_value = "none")]
+    /// auto 优先级: FRANK_AI_PROVIDER env > claude > codex > gemini > none (兜底).
+    #[arg(long, default_value = "auto")]
     pub extract_with: String,
 }
 
