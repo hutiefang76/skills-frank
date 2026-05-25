@@ -3,7 +3,8 @@
 //! # 抽象层
 //!
 //! - [`memory`] — 数据类型 ([`Scope`], [`MemoryRecord`], [`MemoryMatch`], [`SearchOpts`])
-//! - [`store`] — [`MemoryStore`] trait + Qdrant 实现
+//! - [`store`] — [`MemoryStore`] trait + Qdrant 实现 (远程)
+//! - [`local_store`] — [`LocalStore`] trait + LanceDB 实现 (本地主存, v0.11 加, 见 ADR-010)
 //! - [`embed`] — [`Embedder`] trait + OpenAI 实现
 //! - [`extract`] — [`FactExtractor`] trait + Anthropic Claude 实现
 //! - [`client`] — 高层 [`Memory`] 门面: `add` / `search` / `get` / `update` / `delete` / `list`
@@ -23,11 +24,13 @@
 pub mod client;
 pub mod embed;
 pub mod extract;
+pub mod local_store;
 pub mod memory;
 pub mod store;
 
 pub use client::{Memory, MemoryConfig};
 pub use embed::Embedder;
 pub use extract::FactExtractor;
+pub use local_store::{LocalRecord, LocalStore, SyncStatus};
 pub use memory::{MemoryId, MemoryMatch, MemoryRecord, Scope, SearchOpts};
 pub use store::MemoryStore;

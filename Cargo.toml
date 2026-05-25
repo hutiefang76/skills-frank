@@ -32,6 +32,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"]
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 sha2 = "0.10"
 tempfile = "3.27"
+# v0.11 A: 文件锁 (frank-cli history 已用 0.4.3, 升 workspace 给 frank-memory 也用)
+fs2 = "0.4"
 
 # ---- 编译配置 (workspace 级生效全部子 crate) ----
 [profile.release]

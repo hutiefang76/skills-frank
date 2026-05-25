@@ -32,6 +32,19 @@ uuid = { version = "1.23", features = ["v4", "serde"] }
 # Async trait (P0 用 async-trait, 待 1.75+ AFIT 成熟再切; trait_variant 当前对 dyn 不友好)
 async-trait = "0.1"
 
+# v0.11 A (ADR-010): 本地 LanceDB 主存. 嵌入式向量库 + Apache Arrow 列存.
+# - lancedb: 高层 Connection/Table API (0.29.0, 2026-05-13, 414k 下载)
+#   arrow-schema / arrow-array 走 lancedb::arrow::* re-export, 避免版本漂移
+# - futures: 收集 lancedb 返回的 Stream<Item=RecordBatch>
+# - fs2: 写串行化文件锁 (workspace 共享, frank-cli history 已用)
+# - dirs: 跨平台 home dir 探测 (frank-cli 已用同版本)
+lancedb = { version = "0.29", default-features = false }
+# arrow-array 必须显式加 (lancedb 0.29 只 re-export arrow_schema); 版本对齐 lancedb 内部 58
+arrow-array = "58"
+futures = "0.3"
+fs2 = { workspace = true }
+dirs = "6"
+
 # HTTP 客户端 (调 Anthropic / OpenAI REST)
 # default-features=false 去掉 native-tls, 用 rustls 跨平台无系统依赖
 reqwest = { version = "0.13", default-features = false, features = [
