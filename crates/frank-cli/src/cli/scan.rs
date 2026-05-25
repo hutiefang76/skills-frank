@@ -103,6 +103,9 @@ pub fn run(args: Args) -> Result<()> {
         ));
     }
 
+    // v0.10.8 D5: 扫完顺手按用户配的 model 刷 frank-ask-* skill (静默, 跟 install 钩子一样).
+    crate::cli::refresh_skills::auto_refresh(true);
+
     Ok(())
 }
 

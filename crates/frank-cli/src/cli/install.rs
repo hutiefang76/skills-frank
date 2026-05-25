@@ -158,6 +158,10 @@ pub fn run(args: Args) -> Result<()> {
     // 不打印任何用户面消息 (是设计 — 详见 cli/claude_template.rs 模块文档).
     crate::cli::claude_template::ensure_claude_template_silent();
 
+    // v0.10.8 D5: 装完 skill 顺手按用户配的 model 刷一遍 frank-ask-* skill (静默).
+    // 用户感知不到 — 失败也吞 (有 tracing::warn). 详见 cli/refresh_skills.rs.
+    crate::cli::refresh_skills::auto_refresh(true);
+
     Ok(())
 }
 

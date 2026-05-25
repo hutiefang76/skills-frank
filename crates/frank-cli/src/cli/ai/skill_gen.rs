@@ -49,7 +49,11 @@ impl SkillTemplate {
     /// 跟 slash command 一致 — 用户输入 `/<skill_name> <prompt>` 触发。
     #[must_use]
     pub fn skill_name(&self) -> String {
-        format!("frank-ask-{}-{}", self.provider, safe_model_name(&self.model))
+        format!(
+            "frank-ask-{}-{}",
+            self.provider,
+            safe_model_name(&self.model)
+        )
     }
 
     /// 完整目标路径 (例 `~/.claude/skills/frank-ask-claude-kimi-k2-5/`)。
@@ -148,9 +152,8 @@ fn write_atomic(path: &Path, content: &str) -> Result<()> {
             .unwrap_or("frank-skill")
     ));
     fs::write(&tmp, content).with_context(|| format!("write tmp {}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| {
-        format!("rename {} -> {}", tmp.display(), path.display())
-    })?;
+    fs::rename(&tmp, path)
+        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
     Ok(())
 }
 
@@ -187,8 +190,8 @@ pub fn clean_stale_skills(
     if !target_dir.exists() {
         return Ok(removed); // 目录不存在 → 啥都不用清
     }
-    let entries = fs::read_dir(target_dir)
-        .with_context(|| format!("read_dir {}", target_dir.display()))?;
+    let entries =
+        fs::read_dir(target_dir).with_context(|| format!("read_dir {}", target_dir.display()))?;
     for entry in entries.flatten() {
         let Ok(file_type) = entry.file_type() else {
             continue;

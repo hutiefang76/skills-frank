@@ -33,6 +33,7 @@ pub mod market;
 pub mod memory;
 pub mod orchestrator;
 pub mod orchestrator_server;
+pub mod refresh_skills;
 pub mod scan;
 pub mod sync;
 pub mod ui;
@@ -135,6 +136,9 @@ enum Commands {
 
     /// 回滚到上一个 snapshot (P1 待实现)。
     Rollback,
+
+    /// 按用户配的 model 自动生成 slash command skill (`frank refresh-skills`).
+    RefreshSkills(refresh_skills::Args),
 }
 
 /// CLI 入口 dispatcher。
@@ -180,6 +184,7 @@ pub fn run() -> Result<()> {
         }),
         Commands::Update(args) => update::run(args),
         Commands::Rollback => stub("rollback"),
+        Commands::RefreshSkills(args) => refresh_skills::run(args),
     }
 }
 
