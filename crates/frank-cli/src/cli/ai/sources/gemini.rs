@@ -82,11 +82,7 @@ mod tests {
         with_temp_home(|home| {
             let dir = home.join(".gemini");
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(
-                dir.join("settings.json"),
-                r#"{"model": "gemini-3.1-pro"}"#,
-            )
-            .unwrap();
+            std::fs::write(dir.join("settings.json"), r#"{"model": "gemini-3.1-pro"}"#).unwrap();
             let models = read_models();
             assert_eq!(models.len(), 1);
             assert_eq!(models[0].name, "gemini-3.1-pro");

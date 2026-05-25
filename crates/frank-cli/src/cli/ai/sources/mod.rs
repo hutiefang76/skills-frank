@@ -119,6 +119,11 @@ fn builtin_aliases(provider: &str) -> Vec<ModelEntry> {
 ///
 /// 兜底逻辑: 前 2 路全空时**才**加 alias; 前 2 路有任意一个就**不加** alias
 /// (用户已经显式配过了, 再加内置就杂乱).
+///
+/// **未去重未排序** — 调用方拿到原始 3 路拼接结果, 想去重排序走
+/// `collect_all_for_provider`. 这个低层 API 给 `refresh-skills` 用 (它有自己的
+/// dedupe + max 截断逻辑).
+#[must_use]
 pub fn collect_user_models(provider: &str) -> Vec<ModelEntry> {
     let mut out = Vec::new();
 
@@ -140,6 +145,70 @@ pub fn collect_user_models(provider: &str) -> Vec<ModelEntry> {
         out.extend(builtin_aliases(provider));
     }
 
+    out
+}
+
+/// D2: 4 路合并 + 去重 + 排序 — 单 provider 的最终模型清单.
+///
+/// # 去重
+///
+/// 同 name 多次出现保 priority 最小的 (ConfigFile=0 > EnvVar=1 > BuiltinAlias=2).
+/// 例: claude 的 `~/.claude/settings.json` 配了 `haiku`, 内置兜底也有 `haiku` —
+/// 留前者标 `[配置 ...]`, 不重复显示 `[内置兜底]`.
+///
+/// # 排序
+///
+/// 按 `source.priority()` 稳定排序: ConfigFile 在前, EnvVar 中间, BuiltinAlias 在后.
+/// 同优先级保留输入顺序 (codex 的顶层 model 在 profiles 前; 多 provider 按 JSON 字典序).
+///
+/// # 空兜底
+///
+/// 前 2 路均空时 `collect_raw` 已加 alias 兜底, 所以**只要 builtin_aliases 非空** 这个
+/// 函数就不会返回空; opencode 例外 (无兜底) — 用户完全没配时返回空.
+#[must_use]
+pub fn collect_all_for_provider(provider: &str) -> Vec<ModelEntry> {
+    let raw = collect_user_models(provider);
+
+    // 去重: 用 HashMap<name, ModelEntry> 收最高优先级条目.
+    // 注意顺序: 后插入的若 priority 更高 (数字小) 才覆盖.
+    let mut best: std::collections::HashMap<String, ModelEntry> = std::collections::HashMap::new();
+    // 同时维护"首次出现顺序" — 同 priority 时按输入顺序排, HashMap 不保序所以单独存.
+    let mut first_seen: Vec<String> = Vec::new();
+
+    for entry in raw {
+        let cur_priority = entry.source.priority();
+        match best.get(&entry.name) {
+            Some(existing) if existing.source.priority() <= cur_priority => {
+                // 已有更高 (或同优先级、保先到) → 跳过
+            }
+            Some(_) => {
+                // 已有但当前优先级更高 → 覆盖, 不更新 first_seen (位置已定)
+                best.insert(entry.name.clone(), entry);
+            }
+            None => {
+                first_seen.push(entry.name.clone());
+                best.insert(entry.name.clone(), entry);
+            }
+        }
+    }
+
+    // 按 (priority asc, first_seen asc) 稳定排序
+    let mut order_index: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::with_capacity(first_seen.len());
+    for (i, n) in first_seen.iter().enumerate() {
+        order_index.insert(n.as_str(), i);
+    }
+
+    let mut out: Vec<ModelEntry> = best.into_values().collect();
+    out.sort_by_key(|e| {
+        (
+            e.source.priority(),
+            order_index
+                .get(e.name.as_str())
+                .copied()
+                .unwrap_or(usize::MAX),
+        )
+    });
     out
 }
 
@@ -197,5 +266,125 @@ mod tests {
         // 注意: collect_user_models 内部 builtin 也是空, 所以保险地全空
         let r = collect_user_models("nope-fake-provider");
         assert!(r.is_empty(), "got {r:?}");
+    }
+
+    // ===== D2: 去重 + 排序测试 =====
+
+    #[test]
+    fn collect_all_dedupes_same_name_keeps_higher_priority() {
+        // 手造 raw: 同名 "haiku" 既在 ConfigFile 又在 BuiltinAlias → 应只保 ConfigFile
+        // 用 vec 直接喂给排序函数模拟; 不走 collect_raw (它有真 IO)
+        let raw = vec![
+            ModelEntry {
+                name: "haiku".to_string(),
+                source: ModelSource::ConfigFile(std::path::PathBuf::from("/tmp/x")),
+            },
+            ModelEntry {
+                name: "haiku".to_string(),
+                source: ModelSource::BuiltinAlias,
+            },
+            ModelEntry {
+                name: "opus".to_string(),
+                source: ModelSource::BuiltinAlias,
+            },
+        ];
+        let out = dedupe_and_sort_for_test(raw);
+        assert_eq!(out.len(), 2, "haiku 去重后只剩 1 条 + opus 1 条 = 2");
+        let haiku = out.iter().find(|e| e.name == "haiku").unwrap();
+        assert!(
+            matches!(haiku.source, ModelSource::ConfigFile(_)),
+            "去重保留 ConfigFile, 不是 alias"
+        );
+    }
+
+    #[test]
+    fn collect_all_sorts_config_before_alias() {
+        let raw = vec![
+            ModelEntry {
+                name: "alias-a".to_string(),
+                source: ModelSource::BuiltinAlias,
+            },
+            ModelEntry {
+                name: "config-b".to_string(),
+                source: ModelSource::ConfigFile(std::path::PathBuf::from("/x")),
+            },
+            ModelEntry {
+                name: "env-c".to_string(),
+                source: ModelSource::EnvVar("X_MODEL".to_string()),
+            },
+        ];
+        let out = dedupe_and_sort_for_test(raw);
+        // 排序: config 优先 0, env 1, alias 2
+        assert_eq!(out[0].name, "config-b");
+        assert_eq!(out[1].name, "env-c");
+        assert_eq!(out[2].name, "alias-a");
+    }
+
+    #[test]
+    fn collect_all_preserves_input_order_within_same_priority() {
+        // 同 priority (都 ConfigFile) → 按输入顺序保留
+        let path = std::path::PathBuf::from("/x");
+        let raw = vec![
+            ModelEntry {
+                name: "first".to_string(),
+                source: ModelSource::ConfigFile(path.clone()),
+            },
+            ModelEntry {
+                name: "second".to_string(),
+                source: ModelSource::ConfigFile(path.clone()),
+            },
+            ModelEntry {
+                name: "third".to_string(),
+                source: ModelSource::ConfigFile(path),
+            },
+        ];
+        let out = dedupe_and_sort_for_test(raw);
+        assert_eq!(out[0].name, "first");
+        assert_eq!(out[1].name, "second");
+        assert_eq!(out[2].name, "third");
+    }
+
+    /// 测试辅助 — 复用 `collect_all_for_provider` 排序逻辑, 但跳过真 IO.
+    ///
+    /// 把 collect_all_for_provider 的排序段抽出来给测试用; 真生产路径还是走主函数.
+    fn dedupe_and_sort_for_test(raw: Vec<ModelEntry>) -> Vec<ModelEntry> {
+        let mut best: std::collections::HashMap<String, ModelEntry> =
+            std::collections::HashMap::new();
+        let mut first_seen: Vec<String> = Vec::new();
+        for entry in raw {
+            let cur = entry.source.priority();
+            match best.get(&entry.name) {
+                Some(e) if e.source.priority() <= cur => {}
+                Some(_) => {
+                    best.insert(entry.name.clone(), entry);
+                }
+                None => {
+                    first_seen.push(entry.name.clone());
+                    best.insert(entry.name.clone(), entry);
+                }
+            }
+        }
+        let mut idx: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::with_capacity(first_seen.len());
+        for (i, n) in first_seen.iter().enumerate() {
+            idx.insert(n.as_str(), i);
+        }
+        let mut out: Vec<ModelEntry> = best.into_values().collect();
+        out.sort_by_key(|e| {
+            (
+                e.source.priority(),
+                idx.get(e.name.as_str()).copied().unwrap_or(usize::MAX),
+            )
+        });
+        out
+    }
+
+    #[test]
+    fn collect_all_for_provider_real_path_returns_non_empty_for_known() {
+        // 跑真 collect_all_for_provider — claude 至少有内置 alias, 不会空
+        // (注意可能受真实 HOME 影响, 所以只断言"有东西", 不断言具体内容)
+        let _lock = crate::cli::ai::history_store::test_home_lock();
+        let r = collect_all_for_provider("claude");
+        assert!(!r.is_empty(), "claude 至少有内置 alias 兜底");
     }
 }

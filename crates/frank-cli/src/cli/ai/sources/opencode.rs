@@ -33,11 +33,7 @@ use super::{ModelEntry, ModelSource};
 ///
 /// 注意: opencode **不在** `~/.opencode/`, 而是 XDG 风格 `~/.config/opencode/`.
 fn settings_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| {
-        h.join(".config")
-            .join("opencode")
-            .join("opencode.json")
-    })
+    dirs::home_dir().map(|h| h.join(".config").join("opencode").join("opencode.json"))
 }
 
 /// 读 opencode 配置里所有 provider 的 models.
@@ -66,7 +62,10 @@ pub fn read_models() -> Vec<ModelEntry> {
     };
 
     for (provider_name, provider_cfg) in providers {
-        let Some(models) = provider_cfg.get("models").and_then(serde_json::Value::as_object) else {
+        let Some(models) = provider_cfg
+            .get("models")
+            .and_then(serde_json::Value::as_object)
+        else {
             continue;
         };
         for model_id in models.keys() {
@@ -164,11 +163,7 @@ mod tests {
         with_temp_home(|home| {
             let dir = home.join(".config").join("opencode");
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(
-                dir.join("opencode.json"),
-                r#"{"mcp": {}, "plugin": []}"#,
-            )
-            .unwrap();
+            std::fs::write(dir.join("opencode.json"), r#"{"mcp": {}, "plugin": []}"#).unwrap();
             assert!(read_models().is_empty());
         });
     }
