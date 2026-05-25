@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use frank_memory::{MemoryId, Scope};
 
 use super::args::{AddArgs, AddRawArgs, DeleteArgs, GetArgs, ListArgs, SearchArgs};
+use super::report::{build_memory_report, eprint_memory_report, Stopwatch};
 use crate::sync_client::SyncClient;
 
 /// 把 (user, agent, session) 三个可选字符串收进 `Scope`。
@@ -167,7 +168,11 @@ fn parse_facts_json(raw: &str) -> Result<Vec<String>> {
 pub fn run_add_raw(client: &SyncClient, args: AddRawArgs) -> Result<()> {
     let scope = scope_of(args.user, args.agent, args.session);
     let metadata = parse_metadata(args.metadata)?;
+    // v0.10.5: 客户端 CallReport (input_tokens 估 fact 字符数 / 4)
+    let sw = Stopwatch::start();
     let id = client.add_raw(&args.fact, &scope, metadata.as_ref())?;
+    let report = build_memory_report("add_raw", &args.fact, client.base_url(), sw.elapsed_ms(), 0);
+    eprint_memory_report(&report);
     crate::log::ui::success(&format!("stored raw fact: {id}"));
     Ok(())
 }
@@ -175,7 +180,11 @@ pub fn run_add_raw(client: &SyncClient, args: AddRawArgs) -> Result<()> {
 /// `frank memory search` 实现。
 pub fn run_search(client: &SyncClient, args: SearchArgs) -> Result<()> {
     let scope = scope_of(args.user, args.agent, None);
+    // v0.10.5: 客户端 stopwatch + CallReport stderr (chars/4 估 token, Confidence::Low)
+    let sw = Stopwatch::start();
     let matches = client.search(&args.query, &scope, args.limit, args.score_threshold)?;
+    let report = build_memory_report("search", &args.query, client.base_url(), sw.elapsed_ms(), 0);
+    eprint_memory_report(&report);
 
     if matches.is_empty() {
         crate::log::ui::warn("no match");
@@ -198,7 +207,11 @@ pub fn run_search(client: &SyncClient, args: SearchArgs) -> Result<()> {
 /// `frank memory list` 实现。
 pub fn run_list(client: &SyncClient, args: ListArgs) -> Result<()> {
     let scope = scope_of(args.user, args.agent, args.session);
+    // v0.10.5: list 无 embed (走 scope filter), input_tokens=0 但仍打 latency 节点
+    let sw = Stopwatch::start();
     let records = client.list(&scope, args.limit)?;
+    let report = build_memory_report("list", "", client.base_url(), sw.elapsed_ms(), 0);
+    eprint_memory_report(&report);
     if records.is_empty() {
         crate::log::ui::warn("no record in scope");
         return Ok(());

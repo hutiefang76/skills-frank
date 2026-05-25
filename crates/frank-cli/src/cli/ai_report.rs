@@ -155,8 +155,7 @@ pub fn parse_codex_jsonl(
             Some("item.completed") => {
                 // 新版 codex 把 reply 文本放在 item.text 里 (item.type=agent_message)
                 if let Some(item) = msg.get("item") {
-                    let is_msg =
-                        item.get("type").and_then(Value::as_str) == Some("agent_message");
+                    let is_msg = item.get("type").and_then(Value::as_str) == Some("agent_message");
                     if is_msg {
                         if let Some(text) = item.get("text").and_then(Value::as_str) {
                             reply.push_str(text);
