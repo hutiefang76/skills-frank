@@ -137,6 +137,14 @@ pub async fn serve(addr: SocketAddr) -> Result<()> {
         .route("/api/memory/search", post(api_memory_search))
         .route("/api/memory/add_raw", post(api_memory_add_raw))
         .route("/api/memory/:id", delete(api_memory_delete))
+        // v0.10.7 D7: AI 历史浏览 REST (本地 ~/.frank/ai_history.jsonl, 不走 sync-agent)
+        .route("/api/ai-history/list", get(api_ai_hist_list))
+        .route("/api/ai-history/export", get(api_ai_hist_export))
+        .route("/api/ai-history", delete(api_ai_hist_delete_before))
+        .route(
+            "/api/ai-history/:id",
+            get(api_ai_hist_show).delete(api_ai_hist_delete),
+        )
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -756,4 +764,278 @@ fn handler_err(e: anyhow::Error) -> (StatusCode, Json<OkResp>) {
             error: Some(format!("{e:#}")),
         }),
     )
+}
+
+// ============================================================
+// v0.10.7 D7: AI 历史 REST handlers
+//
+// 5 个端点, 全部 spawn_blocking 调 HistoryStore (因为 fs 操作 + fs2 锁是 blocking).
+// 数据全在本地 ~/.frank/ai_history.jsonl + ai-history-full/, 不走 sync-agent.
+// ============================================================
+
+use crate::cli::ai::history_store::{FullRecord, HistoryEntry, HistoryStore, ListFilter};
+
+/// `GET /api/ai-history/list?provider=&status=&since=&limit=&offset=`
+///
+/// query string 而非 POST body — list 是只读, GET 更符合 REST, 浏览器能保存历史.
+#[derive(Deserialize)]
+struct AiHistListQuery {
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    /// ISO-8601 或 YYYY-MM-DD
+    #[serde(default)]
+    since: Option<String>,
+    /// 取多少条, 默认 200 (几年下来超过几万再上分页)
+    #[serde(default = "default_ai_hist_limit")]
+    limit: usize,
+    /// 偏移 (跳过前 N 条, 0 = 从最新开始)
+    #[serde(default)]
+    offset: usize,
+}
+fn default_ai_hist_limit() -> usize {
+    200
+}
+
+async fn api_ai_hist_list(
+    axum::extract::Query(q): axum::extract::Query<AiHistListQuery>,
+) -> Result<Json<Vec<HistoryEntry>>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<HistoryEntry>> {
+        let since = match q.since.as_deref() {
+            Some(s) => Some(parse_date_loose(s)?),
+            None => None,
+        };
+        let filter = ListFilter {
+            provider: q.provider,
+            status: q.status,
+            since,
+            cwd: None,
+            // 拉全表, 再 skip+take (ListFilter::limit 是 take 不是 skip+take)
+            limit: None,
+        };
+        let mut entries = HistoryStore::list(&filter)?;
+        if q.offset > 0 {
+            entries = entries.into_iter().skip(q.offset).collect();
+        }
+        if entries.len() > q.limit {
+            entries.truncate(q.limit);
+        }
+        Ok(entries)
+    })
+    .await
+    .map_err(internal_err)?
+    .map(Json)
+    .map_err(handler_err)
+}
+
+/// `GET /api/ai-history/:id` — 看一条全文.
+async fn api_ai_hist_show(
+    Path(id): Path<String>,
+) -> Result<Json<FullRecord>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<FullRecord> { HistoryStore::show(&id) })
+        .await
+        .map_err(internal_err)?
+        .map(Json)
+        .map_err(handler_err)
+}
+
+/// `DELETE /api/ai-history/:id` — 单删一条 (索引行 + 全文文件).
+async fn api_ai_hist_delete(
+    Path(id): Path<String>,
+) -> Result<Json<OkResp>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> { HistoryStore::delete(&id) })
+        .await
+        .map_err(internal_err)?
+        .map(|()| {
+            Json(OkResp {
+                ok: true,
+                error: None,
+            })
+        })
+        .map_err(handler_err)
+}
+
+/// `DELETE /api/ai-history?before=YYYY-MM-DD` — 批删时间之前的全部.
+#[derive(Deserialize)]
+struct AiHistBeforeQuery {
+    before: String,
+}
+
+/// 批删响应: 在通用 OkResp 之外多一个 `deleted_count` 字段.
+#[derive(Serialize)]
+struct AiHistDeletedResp {
+    ok: bool,
+    deleted_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+async fn api_ai_hist_delete_before(
+    axum::extract::Query(q): axum::extract::Query<AiHistBeforeQuery>,
+) -> Result<Json<AiHistDeletedResp>, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
+        let cutoff = parse_date_loose(&q.before)?;
+        HistoryStore::delete_before(cutoff)
+    })
+    .await
+    .map_err(internal_err)?
+    .map(|n| {
+        Json(AiHistDeletedResp {
+            ok: true,
+            deleted_count: n,
+            error: None,
+        })
+    })
+    .map_err(handler_err)
+}
+
+/// `GET /api/ai-history/export?format=jsonl|md` — 全量导出.
+#[derive(Deserialize)]
+struct AiHistExportQuery {
+    #[serde(default = "default_export_format")]
+    format: String,
+}
+fn default_export_format() -> String {
+    "jsonl".to_string()
+}
+
+async fn api_ai_hist_export(
+    axum::extract::Query(q): axum::extract::Query<AiHistExportQuery>,
+) -> Result<String, (StatusCode, Json<OkResp>)> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+        HistoryStore::export(&q.format)
+    })
+    .await
+    .map_err(internal_err)?
+    .map_err(handler_err)
+}
+
+/// 宽松解析日期 (跟 CLI 那边一样, 接受 `YYYY-MM-DD` 或 ISO-8601).
+///
+/// 复制一份小函数, 不引入 `cli::ai::parse_date_loose` 是因为它是私有的;
+/// 公开化会增加 module API 表面, 不值. 5 行的副本更轻.
+fn parse_date_loose(s: &str) -> anyhow::Result<DateTime<Utc>> {
+    if let Ok(t) = s.parse::<DateTime<Utc>>() {
+        return Ok(t);
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        let naive = d
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| anyhow::anyhow!("invalid YYYY-MM-DD time"))?;
+        return Ok(chrono::TimeZone::from_utc_datetime(&Utc, &naive));
+    }
+    anyhow::bail!("解析不动日期 `{s}` (支持 YYYY-MM-DD 或 ISO-8601)")
+}
+
+#[cfg(test)]
+mod ai_hist_rest_tests {
+    use super::*;
+
+    /// 串行化 HOME mutation — 复用 history_store 的全局锁, 避免跟那边的测试互撞.
+    fn with_temp_home<F: FnOnce()>(f: F) {
+        let _lock = crate::cli::ai::history_store::test_home_lock();
+        let td = tempfile::tempdir().expect("tempdir");
+        let old = std::env::var_os("HOME");
+        std::env::set_var("HOME", td.path());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        if let Some(o) = old {
+            std::env::set_var("HOME", o);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        if let Err(p) = result {
+            std::panic::resume_unwind(p);
+        }
+    }
+
+    fn sample(id: &str, to: &str) -> HistoryEntry {
+        HistoryEntry {
+            id: id.to_string(),
+            ts: Utc::now().to_rfc3339(),
+            from: "test".to_string(),
+            to: to.to_string(),
+            source_cwd: None,
+            source_tag: None,
+            model: None,
+            prompt_excerpt: "q".to_string(),
+            response_excerpt: "a".to_string(),
+            status: "ok".to_string(),
+            error: None,
+            latency_ms: 0,
+        }
+    }
+
+    #[test]
+    fn list_filter_by_provider_via_store() {
+        with_temp_home(|| {
+            HistoryStore::append(&sample(&HistoryStore::new_id(), "claude"), "q", "a").unwrap();
+            HistoryStore::append(&sample(&HistoryStore::new_id(), "codex"), "q", "a").unwrap();
+            let f = ListFilter {
+                provider: Some("claude".to_string()),
+                ..Default::default()
+            };
+            let r = HistoryStore::list(&f).unwrap();
+            assert_eq!(r.len(), 1);
+            assert_eq!(r[0].to, "claude");
+        });
+    }
+
+    #[test]
+    fn show_via_store() {
+        with_temp_home(|| {
+            let id = HistoryStore::new_id();
+            HistoryStore::append(&sample(&id, "claude"), "完整 Q", "完整 A").unwrap();
+            let full = HistoryStore::show(&id).unwrap();
+            assert_eq!(full.prompt, "完整 Q");
+            assert_eq!(full.response, "完整 A");
+        });
+    }
+
+    #[test]
+    fn delete_via_store() {
+        with_temp_home(|| {
+            let id = HistoryStore::new_id();
+            HistoryStore::append(&sample(&id, "claude"), "q", "a").unwrap();
+            HistoryStore::delete(&id).unwrap();
+            assert_eq!(HistoryStore::list(&ListFilter::default()).unwrap().len(), 0);
+        });
+    }
+
+    #[test]
+    fn delete_before_batch_via_store() {
+        with_temp_home(|| {
+            HistoryStore::append(&sample(&HistoryStore::new_id(), "claude"), "q", "a").unwrap();
+            HistoryStore::append(&sample(&HistoryStore::new_id(), "codex"), "q", "a").unwrap();
+            let cutoff = parse_date_loose("2099-12-31").unwrap();
+            let n = HistoryStore::delete_before(cutoff).unwrap();
+            assert_eq!(n, 2);
+        });
+    }
+
+    #[test]
+    fn export_jsonl_via_store() {
+        with_temp_home(|| {
+            HistoryStore::append(&sample(&HistoryStore::new_id(), "claude"), "q", "a").unwrap();
+            let out = HistoryStore::export("jsonl").unwrap();
+            assert!(out.contains("\"to\":\"claude\""));
+        });
+    }
+
+    #[test]
+    fn parse_date_loose_accepts_yyyy_mm_dd() {
+        let dt = parse_date_loose("2026-05-25").unwrap();
+        assert_eq!(dt.to_rfc3339(), "2026-05-25T00:00:00+00:00");
+    }
+
+    #[test]
+    fn parse_date_loose_accepts_iso8601() {
+        let dt = parse_date_loose("2026-05-25T14:30:22Z").unwrap();
+        assert_eq!(dt.to_rfc3339(), "2026-05-25T14:30:22+00:00");
+    }
+
+    #[test]
+    fn parse_date_loose_rejects_garbage() {
+        assert!(parse_date_loose("not-a-date").is_err());
+    }
 }

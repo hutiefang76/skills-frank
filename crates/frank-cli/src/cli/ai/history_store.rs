@@ -480,24 +480,29 @@ fn render_md(entries: &[HistoryEntry]) -> String {
     out
 }
 
+/// **测试专用** — 全局 HOME mutex.
+///
+/// `cargo test` 默认多线程并跑, 任何修改 `HOME` 环境变量的测试都必须共享同一把锁
+/// (否则一个测试设了 HOME 跑 fs 操作时, 另一个测试在另一个线程里把 HOME 改走,
+/// `dirs::home_dir()` 就指向错误位置, 测试随机失败).
+///
+/// 所有 `cli::ai::*` 跟 `cli::orchestrator_server::*` 的 history 相关测试都拿这把锁.
+#[cfg(test)]
+pub(crate) fn test_home_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::sync::MutexGuard;
 
     use tempfile::TempDir;
 
-    /// 全局锁: cargo test 默认多线程并跑, 改 HOME 的测试必须串行
-    /// (否则一个测试还没读完文件, 另一个改了 HOME 把 dirs::home_dir() 指走).
-    fn home_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        // 别人测试 panic 中毒锁也能拿到 (单测互不依赖, 中毒不致命)
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    /// 临时改 HOME 让单测互不污染。拿全局 home_lock() 实现串行.
+    /// 临时改 HOME 让单测互不污染。拿全局 `test_home_lock()` 实现串行.
     struct HomeGuard {
         _td: TempDir,
         old: Option<std::ffi::OsString>,
@@ -507,7 +512,7 @@ mod tests {
     impl HomeGuard {
         fn new() -> Self {
             // 先拿全局锁, 再改 HOME, 保证一次只有一个测试用临时 HOME
-            let lock = home_lock();
+            let lock = test_home_lock();
             let td = tempfile::tempdir().expect("tempdir");
             let old = std::env::var_os("HOME");
             std::env::set_var("HOME", td.path());
