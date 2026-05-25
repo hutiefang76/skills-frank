@@ -122,6 +122,7 @@
     <div class="tab active" id="tab-jobs" onclick="switchView('jobs')">▶ Jobs</div>
     <div class="tab" id="tab-skills" onclick="switchView('skills')">📦 Skills</div>
     <div class="tab" id="tab-memory" onclick="switchView('memory')">🧠 Memory</div>
+    <div class="tab" id="tab-ai-history" onclick="switchView('ai-history')">📜 AI 历史</div>
   </div>
 </header>
 <main>
@@ -252,6 +253,81 @@
     </tbody>
   </table>
 </div><!-- /#view-memory -->
+
+<!-- v0.10.7 D6: AI 历史 tab (本地 ~/.frank/ai_history.jsonl + ai-history-full/, 不走 sync-agent) -->
+<div id="view-ai-history" style="display:none;height:100%;padding:20px;overflow-y:auto">
+  <h2 style="font-size:15px;color:#bbb;margin:0 0 12px">📜 AI 问答历史 <small style="color:#666;font-weight:normal" id="ai-hist-counter"></small></h2>
+
+  <div style="background:#222;padding:14px;border-radius:6px;border:1px solid #3a3a3a;margin-bottom:20px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto auto;gap:8px;align-items:end">
+      <div>
+        <label style="display:block;font-size:11px;color:#999;margin-bottom:4px">只看哪个 AI (provider)</label>
+        <select id="ai-hist-provider" style="width:100%;padding:6px 8px;background:#1a1a1a;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:3px;font-size:13px">
+          <option value="">全部</option>
+          <option value="claude">claude</option>
+          <option value="codex">codex</option>
+          <option value="opencode">opencode</option>
+          <option value="gemini">gemini</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:#999;margin-bottom:4px">只看状态</label>
+        <select id="ai-hist-status" style="width:100%;padding:6px 8px;background:#1a1a1a;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:3px;font-size:13px">
+          <option value="">全部</option>
+          <option value="ok">✓ ok</option>
+          <option value="err">✗ err</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:#999;margin-bottom:4px">某天之后 (YYYY-MM-DD)</label>
+        <input id="ai-hist-since" type="date" style="width:100%;padding:6px 8px;background:#1a1a1a;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:3px;font-size:13px">
+      </div>
+      <button onclick="loadAiHistory()" style="padding:7px 14px;background:#4a8eff;color:white;border:none;border-radius:3px;cursor:pointer;font-weight:600">🔄 刷新</button>
+      <button onclick="clearAllAiHistory()" style="padding:7px 14px;background:#dc2626;color:white;border:none;border-radius:3px;cursor:pointer;font-weight:600">🗑 全部清空</button>
+    </div>
+  </div>
+
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead>
+      <tr>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:140px">时间</th>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:180px">from → to</th>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:140px">model</th>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a">问题 (摘要)</th>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:60px">状态</th>
+        <th style="text-align:left;padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:70px">耗时</th>
+        <th style="padding:8px 10px;color:#888;font-weight:500;border-bottom:1px solid #3a3a3a;width:90px">操作</th>
+      </tr>
+    </thead>
+    <tbody id="ai-hist-tbody">
+      <tr><td colspan="7" class="empty">还没加载, 点"刷新"看看. 历史文件在本地 ~/.frank/ai_history.jsonl</td></tr>
+    </tbody>
+  </table>
+</div><!-- /#view-ai-history -->
+
+<!-- 看全文的 modal (复用所有 tab 的全文展示) -->
+<div id="ai-hist-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center">
+  <div style="background:#222;border:1px solid #4a8eff;border-radius:6px;width:80%;max-width:900px;max-height:85vh;display:flex;flex-direction:column">
+    <div style="padding:12px 16px;border-bottom:1px solid #3a3a3a;display:flex;justify-content:space-between;align-items:center">
+      <h3 id="ai-hist-modal-title" style="margin:0;font-size:14px;color:#bbb">历史详情</h3>
+      <button onclick="closeAiHistModal()" style="padding:4px 12px;background:#2a2a2a;color:#ccc;border:1px solid #3a3a3a;border-radius:3px;cursor:pointer">×</button>
+    </div>
+    <div id="ai-hist-modal-meta" style="padding:10px 16px;border-bottom:1px solid #3a3a3a;font-size:12px;color:#aaa"></div>
+    <div style="flex:1;overflow-y:auto;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 6px">
+        <h4 style="margin:0;color:#93c5fd;font-size:13px">Q (完整问题)</h4>
+        <button onclick="copyAiHistField('q')" style="padding:3px 10px;background:#2a2a2a;color:#ccc;border:1px solid #3a3a3a;border-radius:3px;cursor:pointer;font-size:11px">复制 Q</button>
+      </div>
+      <pre id="ai-hist-modal-q" style="background:#0a0a0a;padding:12px;border-radius:4px;border-left:3px solid #4a8eff;white-space:pre-wrap;word-break:break-word;font-family:'SF Mono',Menlo,monospace;font-size:12px;line-height:1.5;color:#e0e0e0;margin:0 0 16px"></pre>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 6px">
+        <h4 style="margin:0;color:#16a34a;font-size:13px">A (完整回答)</h4>
+        <button onclick="copyAiHistField('a')" style="padding:3px 10px;background:#2a2a2a;color:#ccc;border:1px solid #3a3a3a;border-radius:3px;cursor:pointer;font-size:11px">复制 A</button>
+      </div>
+      <pre id="ai-hist-modal-a" style="background:#0a0a0a;padding:12px;border-radius:4px;border-left:3px solid #16a34a;white-space:pre-wrap;word-break:break-word;font-family:'SF Mono',Menlo,monospace;font-size:12px;line-height:1.5;color:#e0e0e0;margin:0"></pre>
+    </div>
+  </div>
+</div>
 
 </main>
 
@@ -658,12 +734,12 @@ async function deleteMemory(id) {
   } catch (e) { toast(`✗ ${e.message}`, true); }
 }
 
-// switchView 增加 memory 支持
+// switchView 加 memory + ai-history tab
 const _origSwitchView = switchView;
 switchView = function(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById(`tab-${name}`).classList.add('active');
-  document.querySelectorAll('#view-jobs, #view-skills, #view-memory').forEach(v => {
+  document.querySelectorAll('#view-jobs, #view-skills, #view-memory, #view-ai-history').forEach(v => {
     v.classList.remove('active');
     v.style.display = 'none';
   });
@@ -672,7 +748,126 @@ switchView = function(name) {
   view.style.display = (name === 'jobs') ? 'grid' : 'block';
   if (name === 'skills') loadSkills();
   if (name === 'memory') loadMemoryList();
+  if (name === 'ai-history') loadAiHistory();
 };
+
+// ============================================================
+// v0.10.7 D6: AI 历史 tab — 列出 / 看全文 / 删 / 全清
+// 后端 5 个 REST 端点在 D7 加: /api/ai-history/list 等
+// ============================================================
+
+async function loadAiHistory() {
+  const tbody = document.getElementById('ai-hist-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="empty">加载中…</td></tr>';
+  // 拼 query string (filter 三个: provider, status, since)
+  const params = new URLSearchParams();
+  const provider = document.getElementById('ai-hist-provider').value;
+  const status = document.getElementById('ai-hist-status').value;
+  const since = document.getElementById('ai-hist-since').value;
+  if (provider) params.set('provider', provider);
+  if (status) params.set('status', status);
+  if (since) params.set('since', since);
+  params.set('limit', '500');
+  try {
+    const resp = await fetch(`/api/ai-history/list?${params}`);
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+      tbody.innerHTML = `<tr><td colspan="7" class="empty">加载失败: ${escapeHtml(data.error || resp.status)}</td></tr>`;
+      return;
+    }
+    const entries = await resp.json();
+    document.getElementById('ai-hist-counter').textContent = ` (${entries.length} 条)`;
+    if (entries.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">filter 后 0 条 (或还没问过 ai)</td></tr>';
+      return;
+    }
+    tbody.innerHTML = entries.map(e => {
+      const date = (e.ts || '').split('T')[0] || '-';
+      const time = ((e.ts || '').split('T')[1] || '').slice(0, 8);
+      const route = `${escapeHtml(e.from)} → ${escapeHtml(e.to)}`;
+      const model = escapeHtml(e.model || '-');
+      const statusBadge = e.status === 'ok'
+        ? '<span style="color:#16a34a">✓ ok</span>'
+        : '<span style="color:#dc2626">✗ err</span>';
+      const latency = ((e.latency_ms || 0) / 1000).toFixed(1) + 's';
+      const idAttr = escapeHtml(e.id);
+      return `
+        <tr style="cursor:pointer" onclick="showAiHistory('${idAttr}')">
+          <td><span style="color:#888;font-size:11px">${date} ${time}</span></td>
+          <td>${route}</td>
+          <td style="font-size:12px">${model}</td>
+          <td style="font-size:12px;color:#aaa;overflow:hidden;text-overflow:ellipsis;max-width:0">${escapeHtml(e.prompt_excerpt || '')}</td>
+          <td>${statusBadge}</td>
+          <td style="font-size:12px;color:#888">${latency}</td>
+          <td>
+            <button class="skill-action" onclick="event.stopPropagation();showAiHistory('${idAttr}')">看</button>
+            <button class="skill-action danger" onclick="event.stopPropagation();deleteAiHistory('${idAttr}')">×</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+async function showAiHistory(id) {
+  try {
+    const resp = await fetch(`/api/ai-history/${encodeURIComponent(id)}`);
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+      toast(`✗ ${data.error || resp.status}`, true);
+      return;
+    }
+    const full = await resp.json();
+    document.getElementById('ai-hist-modal-title').textContent = `历史 ${id}`;
+    document.getElementById('ai-hist-modal-meta').textContent =
+      `时间: ${full.ts || '-'}`;
+    document.getElementById('ai-hist-modal-q').textContent = full.prompt || '';
+    document.getElementById('ai-hist-modal-a').textContent = full.response || '';
+    document.getElementById('ai-hist-modal').style.display = 'flex';
+  } catch (e) { toast(`✗ ${e.message}`, true); }
+}
+
+function closeAiHistModal() {
+  document.getElementById('ai-hist-modal').style.display = 'none';
+}
+
+function copyAiHistField(which) {
+  const el = which === 'q'
+    ? document.getElementById('ai-hist-modal-q')
+    : document.getElementById('ai-hist-modal-a');
+  const text = el.textContent || '';
+  if (!text) { toast('空的, 没东西可复制', true); return; }
+  navigator.clipboard.writeText(text)
+    .then(() => toast(`✓ 复制了 ${which === 'q' ? 'Q' : 'A'} (${text.length} 字符)`))
+    .catch(e => toast(`✗ 复制失败: ${e.message}`, true));
+}
+
+async function deleteAiHistory(id) {
+  if (!confirm(`真删 ${id}? 删了就找不回来了.`)) return;
+  try {
+    const resp = await fetch(`/api/ai-history/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (data.ok) { toast(`✓ 删了 ${id}`); loadAiHistory(); }
+    else { toast(`✗ ${data.error}`, true); }
+  } catch (e) { toast(`✗ ${e.message}`, true); }
+}
+
+async function clearAllAiHistory() {
+  if (!confirm('真要全部清空? 所有 ai ask 历史 (摘要 + 全文) 都会删掉, 找不回来. 继续?')) return;
+  if (!confirm('再确认一次 — 这是不可恢复操作, 真要全清?')) return;
+  // before 设个未来日期, 把所有比该日期早的全删 (= 全删)
+  const future = '2099-12-31';
+  try {
+    const resp = await fetch(`/api/ai-history?before=${future}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (data.ok) {
+      toast(`✓ 全清了 (${data.deleted_count || 0} 条)`);
+      loadAiHistory();
+    } else { toast(`✗ ${data.error}`, true); }
+  } catch (e) { toast(`✗ ${e.message}`, true); }
+}
 </script>
 </body>
 </html>

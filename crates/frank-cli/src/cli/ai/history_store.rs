@@ -292,9 +292,7 @@ impl HistoryStore {
             .write(true)
             .open(&index_path)
             .with_context(|| format!("open {} for lock", index_path.display()))?;
-        lock_f
-            .lock_exclusive()
-            .with_context(|| format!("lock {}", index_path.display()))?;
+        wait_for_lock(&lock_f, &format!("{}", index_path.display()))?;
 
         // 读旧 → 过滤掉 id 那行 → 写 tmp → rename
         let text = std::fs::read_to_string(&index_path)
@@ -354,9 +352,7 @@ impl HistoryStore {
             .write(true)
             .open(&index_path)
             .with_context(|| format!("open {} for lock", index_path.display()))?;
-        lock_f
-            .lock_exclusive()
-            .with_context(|| format!("lock {}", index_path.display()))?;
+        wait_for_lock(&lock_f, &format!("{}", index_path.display()))?;
 
         let text = std::fs::read_to_string(&index_path)
             .with_context(|| format!("read {}", index_path.display()))?;
@@ -750,7 +746,11 @@ mod tests {
         }
         // 读索引文件验证 — 必须正好 10 行, 每行合法 JSON, id 不重复
         let list = HistoryStore::list(&ListFilter::default()).expect("list");
-        assert_eq!(list.len(), 10, "expected 10 entries after 10 concurrent appends");
+        assert_eq!(
+            list.len(),
+            10,
+            "expected 10 entries after 10 concurrent appends"
+        );
         let ids: std::collections::HashSet<_> = list.iter().map(|e| e.id.clone()).collect();
         assert_eq!(ids.len(), 10, "ids should be unique");
     }
