@@ -8,12 +8,23 @@
 # 主机 protoc 路径 (arduino/setup-protoc 装的) 传给容器
 passthrough = ["PROTOC", "PROTOC_INCLUDE"]
 
+# v0.11.0: cross 默认 debian 容器的 protobuf-compiler 太老 (lance-encoding 6.0 调
+# protoc 用 --experimental_allow_proto3_optional, protoc < 3.15 不识别). 直接从 GitHub
+# 拉 protoc 29.x binary (容器本身是 x86_64, 即使 target 是 aarch64, build host 还是 x86).
 [target.aarch64-unknown-linux-gnu]
 pre-build = [
-    "apt-get update && apt-get install --assume-yes --no-install-recommends protobuf-compiler libprotobuf-dev"
+    "apt-get update && apt-get install --assume-yes --no-install-recommends curl unzip ca-certificates",
+    "curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip -o /tmp/protoc.zip",
+    "unzip -o /tmp/protoc.zip -d /usr/local",
+    "chmod +x /usr/local/bin/protoc",
+    "protoc --version"
 ]
 
 [target.x86_64-unknown-linux-gnu]
 pre-build = [
-    "apt-get update && apt-get install --assume-yes --no-install-recommends protobuf-compiler libprotobuf-dev"
+    "apt-get update && apt-get install --assume-yes --no-install-recommends curl unzip ca-certificates",
+    "curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip -o /tmp/protoc.zip",
+    "unzip -o /tmp/protoc.zip -d /usr/local",
+    "chmod +x /usr/local/bin/protoc",
+    "protoc --version"
 ]
