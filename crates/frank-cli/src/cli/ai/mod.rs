@@ -21,6 +21,7 @@
 pub mod history_store;
 pub mod models;
 pub mod skill_gen;
+pub mod sources;
 
 use std::process::Stdio;
 use std::time::Duration;
