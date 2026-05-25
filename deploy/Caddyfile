@@ -43,9 +43,11 @@ http://frank.hutiefang.com:8318, http://101.35.227.232:8318, :8317 {
   # 在加载时用 {$FRANK_API_TOKEN} 占位符内插. 容器外用 /opt/frank/.secrets/api_token 持久化.
 
   @memory_healthz path /memory/healthz
+  # v0.13.0: /tenant/provision 不要 token (bootstrap, fingerprint → token)
+  @tenant_provision path /tenant/provision
   @sync_protected {
-    path /memory/* /orchestrator/*
-    not path /memory/healthz
+    path /memory/* /orchestrator/* /tenant/*
+    not path /memory/healthz /tenant/provision
   }
 
   # healthz 直放 (探活, 公网友好)
@@ -53,10 +55,17 @@ http://frank.hutiefang.com:8318, http://101.35.227.232:8318, :8317 {
     reverse_proxy sync-agent:3000
   }
 
+  # v0.13.0: provision 端点 — 客户端首次跑无 token, 提交 fingerprint 拿 token + machine_code
+  handle @tenant_provision {
+    reverse_proxy sync-agent:3000
+  }
+
   # v0.11.1: 受保护路由 — 接受**任意非空** X-Frank-Token.
   # 服务端 (frank-sync-agent) 把 token 哈希成 tenant_id 隔离数据 — 不同 token 自动不同
   # 命名空间, 用户首次跑 `frank login --new` 拿到独立 token 就有私有 namespace.
   # 老的共享 FRANK_API_TOKEN 仍然 work, 但所有用它的人共享"demo 租户" (数据混在一起).
+  # v0.12.0: 同样保护 /tenant/{register,status,delete,cancel-delete}
+  # v0.13.0: + /tenant/link-machine (现有 token 绑新机器)
   handle @sync_protected {
     @has_token {
       header_regexp token X-Frank-Token .+
