@@ -77,8 +77,8 @@ services:
     # v0.8: bump 0.1.0 → 0.8.0, mock 模式默认关 (LocalEmbedder fastembed 384d + Mock 行拆 extractor).
     # 详见 ADR-003: 默认零 token, 不需要 OPENAI/ANTHROPIC key 也能跑.
     # v0.10.10: 从 ghcr.io 拉瘦身镜像 (80MB, 模型走 volume). tx 上跑 docker compose pull.
-    # v0.12.0: bump v0.10.10 → v0.12.0 (server tenant registry + 配额 + 14d 删除流程).
-    image: ghcr.io/hutiefang76/frank-sync-agent:v0.12.0
+    # v0.13.0: bump v0.12.0 → v0.13.0 (机器绑定 token + /tenant/provision endpoint).
+    image: ghcr.io/hutiefang76/frank-sync-agent:v0.13.0
     container_name: frank-sync-agent
     restart: unless-stopped
     expose:
