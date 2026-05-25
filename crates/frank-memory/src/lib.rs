@@ -26,6 +26,7 @@ pub mod embed;
 pub mod extract;
 pub mod local_store;
 pub mod memory;
+pub mod retrieval;
 pub mod store;
 
 pub use client::{Memory, MemoryConfig};
@@ -33,4 +34,5 @@ pub use embed::Embedder;
 pub use extract::FactExtractor;
 pub use local_store::{LocalRecord, LocalStore, SyncStatus};
 pub use memory::{MemoryId, MemoryMatch, MemoryRecord, Scope, SearchOpts};
+pub use retrieval::HybridRetriever;
 pub use store::MemoryStore;
