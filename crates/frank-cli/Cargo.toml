@@ -74,6 +74,14 @@ toml = "0.8"
 # v0.10.6 P2 D1: mcp_inspect::opencode 读取用
 json5 = "0.4"
 
+# 文件锁: v0.10.7 D3+D4 — 多窗口同时跑 `frank ai ask` 时, 写 history
+# 文件不串 (Mac/Linux 现状已基本安全, Windows 不保证). 拿放一次 <1ms,
+# 不影响速度.
+fs2 = "0.4"
+
+# 随机数: v0.10.7 D4 — history id 后 4 位 hex (`20260525-143022-a7f2` 的 `a7f2`)
+rand = "0.8"
+
 # frank-memory 类型复用: Scope / MemoryRecord / MemoryMatch / MemoryId
 # 走 path 依赖, 不上 crates.io
 frank-memory = { path = "../frank-memory" }

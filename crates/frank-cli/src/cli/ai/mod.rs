@@ -18,16 +18,59 @@
 //! 不传任何 system prompt / tool flag / model override — 模型选 + 模式选都
 //! 让 CLI 自己定 (用户已经在 CLI 配置里选好了 opus / gpt-5.5 / qwen3.6+).
 
-use std::path::PathBuf;
+pub mod history_store;
+pub mod models;
+
 use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use frank_orchestrator::worker::local::CliProvider;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::time::timeout;
+
+use history_store::{HistoryEntry, HistoryStore, ListFilter};
+
+/// 帮 `run_ask` 拼一条 history 摘要 (成功路径).
+///
+/// 调用方拿到这个 entry 后再交给 `HistoryStore::append` 写到索引 + 全文文件.
+fn entry_ok(args: &AskArgs, prompt: &str, response: &str, latency_ms: u64) -> HistoryEntry {
+    HistoryEntry {
+        id: HistoryStore::new_id(),
+        ts: Utc::now().to_rfc3339(),
+        from: args.from.clone().unwrap_or_else(|| "unknown".to_string()),
+        to: args.to.clone(),
+        source_cwd: args.source_cwd.clone(),
+        source_tag: args.source_tag.clone(),
+        model: args.model.clone(),
+        prompt_excerpt: prompt.chars().take(200).collect(),
+        response_excerpt: response.chars().take(200).collect(),
+        status: "ok".to_string(),
+        error: None,
+        latency_ms,
+    }
+}
+
+/// 帮 `run_ask` 拼一条 history 摘要 (失败路径).
+fn entry_err(args: &AskArgs, prompt: &str, error: &str, latency_ms: u64) -> HistoryEntry {
+    HistoryEntry {
+        id: HistoryStore::new_id(),
+        ts: Utc::now().to_rfc3339(),
+        from: args.from.clone().unwrap_or_else(|| "unknown".to_string()),
+        to: args.to.clone(),
+        source_cwd: args.source_cwd.clone(),
+        source_tag: args.source_tag.clone(),
+        model: args.model.clone(),
+        prompt_excerpt: prompt.chars().take(200).collect(),
+        response_excerpt: String::new(),
+        status: "err".to_string(),
+        error: Some(error.to_string()),
+        latency_ms,
+    }
+}
 
 /// `frank ai` 参数。
 #[derive(Parser, Debug)]
@@ -51,7 +94,8 @@ pub enum AiCommand {
 #[derive(Parser, Debug)]
 pub struct AskArgs {
     /// 目标 provider (claude / codex / opencode / gemini)。
-    #[arg(long)]
+    /// `--list-models` 模式下不需要 (仅列模型不实际 ask).
+    #[arg(long, required_unless_present = "list_models", default_value = "")]
     pub to: String,
 
     /// 调用方 provider (claude / codex / opencode / gemini), 用于 session 追溯。
@@ -87,11 +131,42 @@ pub struct AskArgs {
     /// v0.8: 关掉自动存 (ask 完成后异步把 prompt+response 存 frank-memory). 默认存.
     #[arg(long)]
     pub no_save: bool,
+
+    /// v0.10.7 (D1): 列出 4 家 CLI 当前能用的模型, 不实际跑 ask.
+    ///
+    /// 用法 `frank ai ask --list-models` (prompt 可空). 输出 claude/codex/opencode/gemini
+    /// 各自支持的 model 名 (内置清单 + opencode 实时拉 + `~/.frank/models.yaml` 用户自定义).
+    #[arg(long)]
+    pub list_models: bool,
 }
 
 /// `frank ai history` 参数。
+///
+/// v0.10.7 D5: 拆成子命令 list / show / delete / export。
+/// 不传子命令 = 沿用老行为, 等价于 `list`。
 #[derive(Parser, Debug)]
 pub struct HistoryArgs {
+    /// 子命令 (`list` / `show` / `delete` / `export`). 不传 = list.
+    #[command(subcommand)]
+    pub command: Option<HistoryCmd>,
+}
+
+/// `frank ai history` 子命令。
+#[derive(Subcommand, Debug)]
+pub enum HistoryCmd {
+    /// 列历史 (摘要表格, 支持 filter)。
+    List(ListArgs),
+    /// 看一条的完整 prompt + 回答 (按 id)。
+    Show(ShowArgs),
+    /// 删: 单删 id, 或批删 `--before <日期>`。
+    Delete(DeleteArgs),
+    /// 全量导出 (jsonl / md)。重定向到文件: `frank ai history export > h.md`.
+    Export(ExportArgs),
+}
+
+/// `frank ai history list` 参数。
+#[derive(Parser, Debug)]
+pub struct ListArgs {
     /// 显示条数, 默认 20.
     #[arg(long, default_value_t = 20)]
     pub limit: usize,
@@ -107,6 +182,43 @@ pub struct HistoryArgs {
     /// 只看某个 source cwd (按 contains 子串匹配).
     #[arg(long)]
     pub cwd: Option<String>,
+
+    /// 只看某个目标 provider (例 `--provider codex` 只看 codex 的).
+    #[arg(long)]
+    pub provider: Option<String>,
+
+    /// 只看某个状态 (`ok` / `err`).
+    #[arg(long)]
+    pub status: Option<String>,
+
+    /// 只看某天之后 (YYYY-MM-DD).
+    #[arg(long)]
+    pub since: Option<String>,
+}
+
+/// `frank ai history show` 参数。
+#[derive(Parser, Debug)]
+pub struct ShowArgs {
+    /// 历史短码 id (`frank ai history list` 第一列那个).
+    pub id: String,
+}
+
+/// `frank ai history delete` 参数。
+#[derive(Parser, Debug)]
+pub struct DeleteArgs {
+    /// 单删: 历史短码 id (与 --before 二选一).
+    pub id: Option<String>,
+    /// 批删: 此日期之前的全删 (YYYY-MM-DD).
+    #[arg(long, conflicts_with = "id")]
+    pub before: Option<String>,
+}
+
+/// `frank ai history export` 参数。
+#[derive(Parser, Debug)]
+pub struct ExportArgs {
+    /// 导出格式: `jsonl` (默认) 或 `md`.
+    #[arg(long, default_value = "jsonl")]
+    pub format: String,
 }
 
 /// 执行 ai 命令。
@@ -123,6 +235,10 @@ pub fn run(args: Args) -> Result<()> {
 }
 
 async fn run_ask(args: AskArgs) -> Result<()> {
+    // D1: --list-models 短路 — 列模型不实际 spawn CLI, prompt 可空.
+    if args.list_models {
+        return models::print_all();
+    }
     if args.prompt.is_empty() {
         anyhow::bail!("missing prompt (用法: `frank ai ask --to codex \"你的问题\"`)");
     }
@@ -194,7 +310,8 @@ async fn run_ask(args: AskArgs) -> Result<()> {
             if let Some(r) = call_report {
                 eprintln!("{}", r.render_oneline());
             }
-            let _ = append_history(&HistoryEntry::ok(&args, &raw_prompt, &response, latency_ms));
+            let entry = entry_ok(&args, &raw_prompt, &response, latency_ms);
+            let _ = HistoryStore::append(&entry, &raw_prompt, &response);
             // v0.8 自动存: 异步把 (raw_prompt, response) 存 frank-memory, 失败仅 warn
             if !args.no_save {
                 save_to_memory_if_possible(&args, &raw_prompt, &response).await;
@@ -208,23 +325,23 @@ async fn run_ask(args: AskArgs) -> Result<()> {
         }
         Ok(Ok(status)) => {
             let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-            let _ = append_history(&HistoryEntry::err(
-                &args,
-                &prompt,
-                &format!("exit {}", status.code().unwrap_or(-1)),
-                latency_ms,
-            ));
+            let err_msg = format!("exit {}", status.code().unwrap_or(-1));
+            let entry = entry_err(&args, &prompt, &err_msg, latency_ms);
+            let _ = HistoryStore::append(&entry, &prompt, "");
             anyhow::bail!(
                 "`{bin}` exit {} — 看 `{bin} --help` 检查认证 (尤其 claude 需 `claude setup-token` 一次)",
                 status.code().unwrap_or(-1)
             );
         }
         Ok(Err(e)) => {
-            let _ = append_history(&HistoryEntry::err(&args, &prompt, &format!("{e}"), 0));
+            let err_msg = format!("{e}");
+            let entry = entry_err(&args, &prompt, &err_msg, 0);
+            let _ = HistoryStore::append(&entry, &prompt, "");
             anyhow::bail!("CLI wait failed: {e}");
         }
         Err(_) => {
-            let _ = append_history(&HistoryEntry::err(&args, &prompt, "timeout", 0));
+            let entry = entry_err(&args, &prompt, "timeout", 0);
+            let _ = HistoryStore::append(&entry, &prompt, "");
             anyhow::bail!("`{bin}` timed out after {}s", args.timeout);
         }
     }
@@ -323,121 +440,40 @@ async fn save_to_memory_if_possible(args: &AskArgs, raw_prompt: &str, response: 
     });
 }
 
-// ─── history 持久化 (v0.6 新, ~/.frank/ai_history.jsonl) ───────────────────
-
-/// 一条 ai ask history 记录 (JSONL, 一行一条).
-#[derive(serde::Serialize, serde::Deserialize)]
-struct HistoryEntry {
-    /// ISO-8601 UTC timestamp.
-    ts: String,
-    /// 调用方 provider (claude / codex / cli / unknown).
-    from: String,
-    /// 目标 provider.
-    to: String,
-    /// 调用方工作目录 (project 追溯关键).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_cwd: Option<String>,
-    /// 用户自定义 tag.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_tag: Option<String>,
-    /// prompt 前 200 字符 (history 不存全文, 避免长 prompt 撑爆文件).
-    prompt_excerpt: String,
-    /// 响应前 200 字符.
-    response_excerpt: String,
-    /// 状态: "ok" / "err".
-    status: String,
-    /// 错误信息 (status=err 时).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    /// 耗时 (毫秒).
-    latency_ms: u64,
-}
-
-impl HistoryEntry {
-    fn base(args: &AskArgs, prompt: &str) -> Self {
-        Self {
-            ts: chrono::Utc::now().to_rfc3339(),
-            from: args.from.clone().unwrap_or_else(|| "unknown".to_string()),
-            to: args.to.clone(),
-            source_cwd: args.source_cwd.clone(),
-            source_tag: args.source_tag.clone(),
-            prompt_excerpt: prompt.chars().take(200).collect(),
-            response_excerpt: String::new(),
-            status: "ok".to_string(),
-            error: None,
-            latency_ms: 0,
-        }
-    }
-    fn ok(args: &AskArgs, prompt: &str, response: &str, latency_ms: u64) -> Self {
-        let mut e = Self::base(args, prompt);
-        e.response_excerpt = response.chars().take(200).collect();
-        e.latency_ms = latency_ms;
-        e
-    }
-    fn err(args: &AskArgs, prompt: &str, error: &str, latency_ms: u64) -> Self {
-        let mut e = Self::base(args, prompt);
-        e.status = "err".to_string();
-        e.error = Some(error.to_string());
-        e.latency_ms = latency_ms;
-        e
-    }
-}
-
-fn history_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".frank").join("ai_history.jsonl"))
-}
-
-fn append_history(entry: &HistoryEntry) -> Result<()> {
-    let Some(path) = history_path() else {
-        return Ok(());
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    let line = serde_json::to_string(entry).context("serialize history entry")?;
-    use std::io::Write as _;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("open {}", path.display()))?;
-    writeln!(f, "{line}").context("write history line")?;
-    Ok(())
-}
+// ─── history 命令分发 (D5 — 接 history_store::HistoryStore) ──────────────────
 
 fn run_history(args: HistoryArgs) -> Result<()> {
-    let Some(path) = history_path() else {
-        crate::log::ui::warn("找不到 home dir, 无 history");
-        return Ok(());
-    };
-    if !path.exists() {
-        crate::log::ui::info("还没有 ai ask 历史 (跑 `frank ai ask --to <p> '...'` 第一次)");
-        return Ok(());
+    let cmd = args
+        .command
+        .unwrap_or(HistoryCmd::List(ListArgs::default()));
+    match cmd {
+        HistoryCmd::List(a) => run_history_list(a),
+        HistoryCmd::Show(a) => run_history_show(a),
+        HistoryCmd::Delete(a) => run_history_delete(a),
+        HistoryCmd::Export(a) => run_history_export(a),
     }
-    let text =
-        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let mut entries: Vec<HistoryEntry> = text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect();
-    entries.reverse(); // 最新在前
+}
+
+fn run_history_list(args: ListArgs) -> Result<()> {
+    let filter = ListFilter {
+        provider: args.provider,
+        status: args.status,
+        since: args.since.as_deref().and_then(parse_since),
+        cwd: args.cwd,
+        // 拉全表, 后面 from + limit 自己再过 / 截
+        limit: None,
+    };
+    let mut entries = HistoryStore::list(&filter)?;
     if let Some(f) = &args.from {
         entries.retain(|e| &e.from == f);
     }
-    if let Some(c) = &args.cwd {
-        entries.retain(|e| e.source_cwd.as_deref().is_some_and(|s| s.contains(c)));
-    }
+    let total = entries.len();
     let take = if args.all {
         entries.len()
     } else {
         args.limit.min(entries.len())
     };
-    crate::log::ui::section(&format!(
-        "ai ask history ({} 条 / 共 {} 条)",
-        take,
-        entries.len()
-    ));
+    crate::log::ui::section(&format!("ai ask history ({take} 条 / 共 {total} 条)"));
     for e in entries.iter().take(take) {
         let cwd = e.source_cwd.as_deref().unwrap_or("");
         let tag = e
@@ -449,14 +485,17 @@ fn run_history(args: HistoryArgs) -> Result<()> {
         #[allow(clippy::cast_precision_loss)]
         // latency_ms 大于 2^53 才丢精度, 这里上限 timeout=3600s
         let latency_s = e.latency_ms as f64 / 1000.0;
+        let model = e.model.as_deref().unwrap_or("-");
         println!(
-            "{} {} {} → {} ({:.1}s){}",
+            "{} {}  {} → {} [{}] ({:.1}s){}  id={}",
             status_icon,
             e.ts.split('T').next().unwrap_or(&e.ts),
             e.from,
             e.to,
+            model,
             latency_s,
             tag,
+            e.id,
         );
         println!("  cwd: {cwd}");
         println!("  Q: {}", e.prompt_excerpt);
@@ -468,6 +507,65 @@ fn run_history(args: HistoryArgs) -> Result<()> {
         println!();
     }
     Ok(())
+}
+
+fn run_history_show(args: ShowArgs) -> Result<()> {
+    let full = HistoryStore::show(&args.id)?;
+    crate::log::ui::section(&format!("history {} — {}", args.id, full.ts));
+    println!("# Q\n{}\n", full.prompt);
+    println!("# A\n{}", full.response);
+    Ok(())
+}
+
+fn run_history_delete(args: DeleteArgs) -> Result<()> {
+    match (args.id, args.before) {
+        (Some(id), _) => {
+            HistoryStore::delete(&id)?;
+            crate::log::ui::success(&format!("删了 {id}"));
+        }
+        (None, Some(before)) => {
+            let cutoff = parse_since(&before)
+                .ok_or_else(|| anyhow::anyhow!("`--before` 要 YYYY-MM-DD 格式, 收到 `{before}`"))?;
+            let n = HistoryStore::delete_before(cutoff)?;
+            crate::log::ui::success(&format!("删了 {n} 条 (在 {before} 之前)"));
+        }
+        (None, None) => {
+            anyhow::bail!("要 `frank ai history delete <id>` 或 `frank ai history delete --before YYYY-MM-DD`");
+        }
+    }
+    Ok(())
+}
+
+fn run_history_export(args: ExportArgs) -> Result<()> {
+    let out = HistoryStore::export(&args.format)?;
+    // 不走 ui::* (因为用户会 `> file` 重定向 stdout)
+    print!("{out}");
+    Ok(())
+}
+
+/// 把 `YYYY-MM-DD` (或完整 RFC3339) parse 成 UTC `DateTime`.
+///
+/// 简单做法: 优先按 `YYYY-MM-DD` 配 `00:00:00 UTC`; 失败再 fallback RFC3339.
+fn parse_since(s: &str) -> Option<DateTime<Utc>> {
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .map(|naive| Utc.from_utc_datetime(&naive))
+        .or_else(|| s.parse::<DateTime<Utc>>().ok())
+}
+
+impl Default for ListArgs {
+    fn default() -> Self {
+        Self {
+            limit: 20,
+            all: false,
+            from: None,
+            cwd: None,
+            provider: None,
+            status: None,
+            since: None,
+        }
+    }
 }
 
 fn parse_provider(s: &str) -> Result<CliProvider> {
