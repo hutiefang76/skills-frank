@@ -1,0 +1,19 @@
+# cross-rs 配置 — 给 aarch64-unknown-linux-gnu 等需要交叉编译的 target 用.
+#
+# v0.11.0: frank-memory 引入 lancedb 0.29, lance-encoding 6.0 build.rs 用 protoc 编 .proto.
+# cross 默认 ghcr.io/cross-rs/<target>:0.2.5 镜像里没装 protoc + libprotobuf-dev,
+# 这里 pre-build 装上, 编 lance-encoding 才能过.
+
+[build.env]
+# 主机 protoc 路径 (arduino/setup-protoc 装的) 传给容器
+passthrough = ["PROTOC", "PROTOC_INCLUDE"]
+
+[target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "apt-get update && apt-get install --assume-yes --no-install-recommends protobuf-compiler libprotobuf-dev"
+]
+
+[target.x86_64-unknown-linux-gnu]
+pre-build = [
+    "apt-get update && apt-get install --assume-yes --no-install-recommends protobuf-compiler libprotobuf-dev"
+]

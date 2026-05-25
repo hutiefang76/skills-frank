@@ -54,6 +54,14 @@ jobs:
         if: matrix.cross
         run: cargo install cross --locked
 
+      # v0.11.0: frank-memory 引入 lancedb 0.29 → lance-encoding 6.0 build.rs 需 protoc
+      # arduino/setup-protoc 跨 mac/linux/windows + cross 构建场景一行装好
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "29.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:

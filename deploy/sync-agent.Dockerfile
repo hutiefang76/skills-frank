@@ -36,12 +36,16 @@ RUN for i in 1 2 3; do \
             pkg-config \
             libssl-dev \
             protobuf-compiler \
+            libprotobuf-dev \
             g++ \
             libstdc++-12-dev \
             ca-certificates \
         && rm -rf /var/lib/apt/lists/* \
         && break || { echo "apt attempt $i failed, retry..."; sleep 5; }; \
     done
+# v0.11.0: 加 libprotobuf-dev 是给 lance-encoding 6.0 build.rs 用 — protobuf-compiler
+# 单独包不带 google/protobuf/*.proto well-known types, 编 encodings_v2_0.proto 报
+# "google/protobuf/empty.proto: File not found".
 
 WORKDIR /workspace
 
