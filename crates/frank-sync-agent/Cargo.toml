@@ -50,5 +50,15 @@ futures = "0.3"
 sha2 = { workspace = true }
 hex = "0.4"
 
+# v0.12.0 tenant registry: SQLite (rusqlite bundled, 静态链 sqlite3 不依赖 OS).
+# 用于持久化 tenants 表 (registry / quota / deletion schedule).
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# v0.12.0 retention worker 真删 qdrant points (by user_id filter, frank-memory 没暴露这个)
+qdrant-client = { version = "1.18", default-features = false, features = ["serde"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

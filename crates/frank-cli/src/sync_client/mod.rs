@@ -190,6 +190,56 @@ impl SyncClient {
         Ok(parsed)
     }
 
+    /// v0.12.0: POST /tenant/register
+    pub fn tenant_register(&self) -> Result<serde_json::Value> {
+        self.post_json_value("/tenant/register", &serde_json::json!({}))
+    }
+
+    /// v0.12.0: GET /tenant/status
+    pub fn tenant_status(&self) -> Result<serde_json::Value> {
+        let url = format!("{}/tenant/status", self.base_url);
+        let mut req = self.http.get(&url);
+        if let Some(t) = &self.token {
+            req = req.header("X-Frank-Token", t);
+        }
+        let resp = req.send().with_context(|| format!("GET {url}"))?;
+        let status = resp.status();
+        let body = resp.text().context("read tenant_status body")?;
+        if !status.is_success() {
+            return Err(extract_error(status, &body));
+        }
+        serde_json::from_str(&body).context("parse tenant_status")
+    }
+
+    /// v0.12.0: POST /tenant/request-deletion
+    pub fn tenant_request_deletion(&self) -> Result<serde_json::Value> {
+        self.post_json_value("/tenant/request-deletion", &serde_json::json!({}))
+    }
+
+    /// v0.12.0: POST /tenant/cancel-deletion
+    pub fn tenant_cancel_deletion(&self) -> Result<serde_json::Value> {
+        self.post_json_value("/tenant/cancel-deletion", &serde_json::json!({}))
+    }
+
+    /// 内部: POST json -> json (任意 body, 任意返回 schema).
+    fn post_json_value(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut req = self.http.post(&url).json(body);
+        if let Some(t) = &self.token {
+            req = req.header("X-Frank-Token", t);
+        }
+        let resp = req.send().with_context(|| format!("POST {url}"))?;
+        let status = resp.status();
+        let text = resp.text().context("read body")?;
+        if !status.is_success() {
+            return Err(extract_error(status, &text));
+        }
+        if text.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+        serde_json::from_str(&text).with_context(|| format!("decode {path} response"))
+    }
+
     /// DELETE /memory/:id — 删除。成功返回 204, 这里就吞掉 status。
     pub fn delete(&self, id: &MemoryId) -> Result<()> {
         let url = format!("{}/memory/{}", self.base_url, id);
@@ -267,6 +317,8 @@ fn print_demo_warning_once() {
 }
 
 /// Token 解析: env `FRANK_API_TOKEN` → `~/.frank/.token` 文件。
+/// v0.12.0: 都没找到 → 自动生成 uuid + 写 `~/.frank/.token` (chmod 600) + 调
+/// `POST /tenant/register` 注册到服务端 (best-effort).
 fn resolve_token() -> Option<String> {
     if let Ok(t) = std::env::var("FRANK_API_TOKEN") {
         if !t.trim().is_empty() {
@@ -274,13 +326,60 @@ fn resolve_token() -> Option<String> {
         }
     }
     let path = dirs::home_dir()?.join(".frank").join(".token");
-    let content = std::fs::read_to_string(&path).ok()?;
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
     }
+    // v0.12.0: 全新机器 — 生成 + 写盘 + 注册
+    auto_provision_token(&path).ok()
+}
+
+/// v0.12.0: 生成随机 uuid token, 写 `~/.frank/.token` (chmod 600), 调服务端 register.
+/// 失败给清晰提示但 best-effort, 不阻止 cli 继续 (用户可后续手动 frank login).
+fn auto_provision_token(path: &std::path::Path) -> anyhow::Result<String> {
+    use anyhow::Context;
+    let token = uuid::Uuid::new_v4().to_string();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create dir {}", parent.display()))?;
+    }
+    std::fs::write(path, &token).with_context(|| format!("write {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    crate::log::ui::info("v0.12.0 首次启动: 生成随机 token (~/.frank/.token, chmod 600)");
+
+    // 调 POST /tenant/register (best-effort)
+    let base_url = wire::resolve_base_url(wire::config_path().ok().as_deref());
+    let url = format!("{}/tenant/register", base_url.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .ok();
+    if let Some(client) = client {
+        match client
+            .post(&url)
+            .header("X-Frank-Token", &token)
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+        {
+            Ok(_) => {
+                crate::log::ui::success(&format!(
+                    "已注册到 {base_url} (独立 tenant namespace, 任何写入都隔离)"
+                ));
+            }
+            Err(e) => {
+                crate::log::ui::warn(&format!(
+                    "tenant 注册失败 (网络? 服务不可达?): {e}. 跑 `frank tenant register` 手动重试"
+                ));
+            }
+        }
+    }
+    Ok(token)
 }
 
 #[cfg(test)]

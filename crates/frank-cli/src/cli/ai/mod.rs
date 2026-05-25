@@ -401,13 +401,17 @@ async fn inject_context_if_requested(raw_prompt: &str, args: &AskArgs) -> String
 
 /// ask 完成后异步存 (prompt, response) 到 frank-memory.
 ///
-/// 不抽事实, 直接拼 "Q: ...\nA: ..." 作为 raw fact 入库 (用户原话: 简单可用先, mem0 风格抽事实留 v0.9).
+/// v0.12.0 改: 默认存 (--no-save 关). --context-from 指定时用作 session_id, 否则用 "auto".
+/// 不抽事实, 直接拼 "Q: ...\nA: ..." 作为 raw fact 入库 (用户原话: 简单可用先, mem0 风格抽事实留 v0.13).
 /// 失败 graceful (sync-agent 不可用就跳过), 不影响 ask 返回值.
 async fn save_to_memory_if_possible(args: &AskArgs, raw_prompt: &str, response: &str) {
-    let Some(session) = args.context_from.clone() else {
-        // --context-from 没指定时不存 (避免污染默认 scope)
+    if args.no_save {
         return;
-    };
+    }
+    let session = args
+        .context_from
+        .clone()
+        .unwrap_or_else(|| "auto".to_string());
     let fact = format!(
         "Q ({} → {}): {}\nA: {}",
         args.from.as_deref().unwrap_or("user"),

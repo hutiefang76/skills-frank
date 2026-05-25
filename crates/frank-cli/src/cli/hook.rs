@@ -139,8 +139,75 @@ fn install_hook() -> Result<()> {
         "frank hook 已注册到 {} (matcher={HOOK_MATCHER})",
         path.display()
     ));
+
+    // v0.12.0 G: 同时注入 ~/.claude/CLAUDE.md, 让 Claude 知道有 frank-memory.
+    inject_claude_md()?;
+
     crate::log::ui::info("以后 Claude Code 调 mcp__memory__add_observations 时, frank 会自动双写到本地 LanceDB + 远程 sync-agent");
     Ok(())
+}
+
+/// v0.12.0 G: 把 frank-memory 介绍段注入到 ~/.claude/CLAUDE.md (无则建). 幂等, 用 BEGIN/END 标记定位.
+fn inject_claude_md() -> Result<()> {
+    let Some(home) = dirs::home_dir() else {
+        return Ok(()); // 非家目录场景跳过
+    };
+    let path = home.join(".claude").join("CLAUDE.md");
+    let begin = "<!-- BEGIN frank-memory (managed by `frank hook install`) -->";
+    let end = "<!-- END frank-memory -->";
+    let block = format!(
+        "\n{begin}\n## frank-memory (v0.12.0)\n\n\
+        你有访问用户分布式记忆的能力 (frank-memory):\n\
+        - 查历史: `frank memory search \"<query>\" --limit 5`\n\
+        - 存新事: `frank memory add \"<内容>\"` (会自动抽 fact)\n\
+        - 列出最近: `frank memory list --limit 10`\n\
+        - 看 quota / 删除状态: `frank tenant status`\n\n\
+        数据隔离: 每个 token sha256 派生独立 tenant, 用户数据互不可见.\n\
+        Server: frank.hutiefang.com (用户也可自建, `frank config set sync.agent_url ...`).\n\
+        {end}\n"
+    );
+
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    if existing.contains(begin) {
+        crate::log::ui::info("CLAUDE.md 已注入过 frank-memory 段, 跳过");
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    let combined = if existing.trim().is_empty() {
+        block
+    } else {
+        format!("{existing}\n{block}")
+    };
+    fs::write(&path, combined).with_context(|| format!("write {}", path.display()))?;
+    crate::log::ui::success(&format!("CLAUDE.md 已注入 frank-memory 段 ({})", path.display()));
+    Ok(())
+}
+
+/// v0.12.0 G: 反向清 CLAUDE.md 中 frank-memory 段 (uninstall 用).
+fn purge_claude_md() {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let path = home.join(".claude").join("CLAUDE.md");
+    let Ok(existing) = fs::read_to_string(&path) else {
+        return;
+    };
+    let begin = "<!-- BEGIN frank-memory";
+    let end = "<!-- END frank-memory -->";
+    let (Some(start), Some(end_idx)) = (existing.find(begin), existing.find(end)) else {
+        return; // 没标记, 跳过
+    };
+    let after_end = end_idx + end.len();
+    let mut new_text = String::with_capacity(existing.len());
+    new_text.push_str(&existing[..start]);
+    new_text.push_str(&existing[after_end..]);
+    // 清掉孤立的换行
+    let new_text = new_text.replace("\n\n\n", "\n\n");
+    if fs::write(&path, new_text).is_ok() {
+        crate::log::ui::info("CLAUDE.md 中的 frank-memory 段已清掉");
+    }
 }
 
 fn uninstall_hook() -> Result<()> {
@@ -185,6 +252,8 @@ fn uninstall_hook() -> Result<()> {
     let new_text = serde_json::to_string_pretty(&root).context("serialize settings.json")?;
     fs::write(&path, new_text).context("write settings.json")?;
     crate::log::ui::success(&format!("已删 {removed} 条 frank hook entry"));
+    // v0.12.0 G: 同时清 CLAUDE.md 注入段
+    purge_claude_md();
     Ok(())
 }
 

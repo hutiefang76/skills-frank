@@ -20,6 +20,8 @@
 //! GET    /orchestrator/jobs/:id/ws    WebSocket 流式日志
 //! ```
 
+use std::time::Duration;
+
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{delete, get, post};
@@ -30,6 +32,7 @@ use sha2::{Digest, Sha256};
 use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;
+use crate::tenant::TenantStatus;
 
 /// v0.11.1 用户隔离: 从 X-Frank-Token 派生 tenant_id (12 hex 字符 = 48 bit,
 /// 生日攻击碰撞门槛 ~16M 用户, 单机部署绰绰有余).
@@ -60,6 +63,47 @@ fn inject_tenant(headers: &HeaderMap, mut scope: Scope) -> Scope {
     scope
 }
 
+/// v0.12.0 ensure registered + quota check (写操作前用). 返回 tenant_id 给后续 update.
+async fn ensure_registered(headers: &HeaderMap, state: &AppState) -> ApiResult<String> {
+    let tenant_id = tenant_id_from_headers(headers);
+    if !state
+        .tenants
+        .is_registered(&tenant_id)
+        .await
+        .map_err(ApiError::from)?
+    {
+        return Err(ApiError::status(
+            StatusCode::UNAUTHORIZED,
+            format!("tenant 未注册. 跑 `frank login` 或 POST /tenant/register (token: {tenant_id}...)"),
+        ));
+    }
+    Ok(tenant_id)
+}
+
+async fn ensure_within_quota(
+    headers: &HeaderMap,
+    state: &AppState,
+    add_n: i64,
+) -> ApiResult<String> {
+    let tenant_id = ensure_registered(headers, state).await?;
+    let status = state
+        .tenants
+        .status(&tenant_id)
+        .await
+        .map_err(ApiError::from)?;
+    let used = status.as_ref().map_or(0, |s| s.records_count);
+    if used + add_n > state.quota_per_tenant {
+        return Err(ApiError::status(
+            StatusCode::TOO_MANY_REQUESTS,
+            format!(
+                "quota_exceeded: tenant 已用 {used}/{} records (申请加配额请联系 hutiefang@gmail.com)",
+                state.quota_per_tenant
+            ),
+        ));
+    }
+    Ok(tenant_id)
+}
+
 /// 顶层 router 构造。
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -71,12 +115,60 @@ pub fn router(state: AppState) -> Router {
         .route("/memory/list", post(memory_list))
         .route("/memory/:id", get(memory_get).delete(memory_delete))
         .route("/memory/delete/:id", delete(memory_delete)) // 同上, 给老 client 兜底
+        // ─── v0.12.0 tenant registry + quota + deletion ───
+        .route("/tenant/register", post(tenant_register))
+        .route("/tenant/status", get(tenant_status))
+        .route("/tenant/request-deletion", post(tenant_request_deletion))
+        .route("/tenant/cancel-deletion", post(tenant_cancel_deletion))
         // ─── 跨设备 skills 同步 (v0.4 — 用户需求 2.3) ───
         .route("/sync/skills/push", post(sync_push))
         .route("/sync/skills/pull", get(sync_pull))
         .route("/sync/skills/devices", get(sync_devices))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
+}
+
+/// v0.12.0 后台 retention worker — 每小时扫一次, 把到期 tenant 真删 (qdrant + sqlite).
+pub fn spawn_retention_worker(state: AppState) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(3600));
+        loop {
+            tick.tick().await;
+            if let Err(e) = run_retention_pass(&state).await {
+                tracing::warn!(error = ?e, "retention pass failed");
+            }
+        }
+    });
+}
+
+async fn run_retention_pass(state: &AppState) -> anyhow::Result<()> {
+    let due = state.tenants.list_due_for_deletion().await?;
+    if due.is_empty() {
+        tracing::debug!("retention pass: 0 tenant 到期");
+        return Ok(());
+    }
+    tracing::info!(count = due.len(), "retention pass: 真删 tenant");
+
+    // 用 qdrant_client 直接按 user_id filter 删 points (Memory::delete 只能按 id 单删)
+    use qdrant_client::qdrant::{Condition, Filter};
+    use qdrant_client::Qdrant;
+
+    let qdrant = Qdrant::from_url(&state.qdrant_url).build()?;
+    for tenant_id in &due {
+        let user_id_value = format!("t_{tenant_id}");
+        let filter = Filter::must([Condition::matches("user_id", user_id_value.clone())]);
+        let delete = qdrant_client::qdrant::DeletePointsBuilder::new(&state.qdrant_collection)
+            .points(filter)
+            .wait(true);
+        if let Err(e) = qdrant.delete_points(delete).await {
+            tracing::warn!(tenant_id, error = ?e, "qdrant delete_points failed; 跳过本轮, 下次重试");
+            continue;
+        }
+        // qdrant 真删后, sqlite 清 row (整个 tenant 移除 registry)
+        state.tenants.delete_tenant(tenant_id).await?;
+        tracing::info!(tenant_id, "tenant 已真删 (qdrant points + sqlite row)");
+    }
+    Ok(())
 }
 
 async fn healthz() -> &'static str {
@@ -102,12 +194,17 @@ async fn memory_add(
     headers: HeaderMap,
     Json(req): Json<AddRequest>,
 ) -> ApiResult<Json<AddResponse>> {
+    let tenant_id = ensure_within_quota(&headers, &state, 1).await?;
     let scope = inject_tenant(&headers, req.scope);
     let ids = state
         .memory
         .add(&req.content, scope, req.metadata)
         .await
         .map_err(ApiError::from)?;
+    let _ = state
+        .tenants
+        .bump_records(&tenant_id, i64::try_from(ids.len()).unwrap_or(i64::MAX))
+        .await;
     Ok(Json(AddResponse { ids }))
 }
 
@@ -130,12 +227,14 @@ async fn memory_add_raw(
     headers: HeaderMap,
     Json(req): Json<AddRawRequest>,
 ) -> ApiResult<Json<AddRawResponse>> {
+    let tenant_id = ensure_within_quota(&headers, &state, 1).await?;
     let scope = inject_tenant(&headers, req.scope);
     let id = state
         .memory
         .add_raw(&req.fact, scope, req.metadata)
         .await
         .map_err(ApiError::from)?;
+    let _ = state.tenants.bump_records(&tenant_id, 1).await;
     Ok(Json(AddRawResponse { id }))
 }
 
@@ -161,6 +260,7 @@ async fn memory_search(
     headers: HeaderMap,
     Json(req): Json<SearchRequest>,
 ) -> ApiResult<Json<SearchResponse>> {
+    let _ = ensure_registered(&headers, &state).await?;
     let scope = inject_tenant(&headers, req.scope);
     let mut opts = SearchOpts::default();
     if let Some(l) = req.limit {
@@ -200,6 +300,7 @@ async fn memory_list(
     headers: HeaderMap,
     Json(req): Json<ListRequest>,
 ) -> ApiResult<Json<ListResponse>> {
+    let _ = ensure_registered(&headers, &state).await?;
     let scope = inject_tenant(&headers, req.scope);
     let records = state
         .memory
@@ -225,13 +326,16 @@ async fn memory_get(
 
 async fn memory_delete(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<uuid::Uuid>,
 ) -> ApiResult<StatusCode> {
+    let tenant_id = ensure_registered(&headers, &state).await?;
     state
         .memory
         .delete(&MemoryId::from_uuid(id))
         .await
         .map_err(ApiError::from)?;
+    let _ = state.tenants.bump_records(&tenant_id, -1).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -239,23 +343,139 @@ async fn memory_delete(
 
 type ApiResult<T> = Result<T, ApiError>;
 
-/// API 错误统一包装, 自动转 500 + JSON 错误体。
-pub struct ApiError(anyhow::Error);
+/// API 错误统一包装, 自动转 JSON 错误体. v0.12.0 加 status code 支持.
+pub struct ApiError {
+    err: anyhow::Error,
+    status: StatusCode,
+}
+
+impl ApiError {
+    /// 显式指定 HTTP status code (e.g. 401 未注册, 429 quota).
+    pub fn status(status: StatusCode, msg: impl Into<String>) -> Self {
+        Self {
+            err: anyhow::anyhow!(msg.into()),
+            status,
+        }
+    }
+}
 
 impl<E: Into<anyhow::Error>> From<E> for ApiError {
     fn from(e: E) -> Self {
-        Self(e.into())
+        Self {
+            err: e.into(),
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+        }
     }
 }
 
 impl axum::response::IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         let body = serde_json::json!({
-            "error": format!("{:#}", self.0),
+            "error": format!("{:#}", self.err),
         });
-        tracing::warn!(error = %self.0, "API error");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
+        tracing::warn!(status = %self.status, error = %self.err, "API error");
+        (self.status, Json(body)).into_response()
     }
+}
+
+// ════════════════════════════════════════════════════════════════
+// v0.12.0 tenant registry + 删除流程
+// ════════════════════════════════════════════════════════════════
+
+#[derive(Serialize)]
+struct RegisterResponse {
+    tenant_id: String,
+    /// "registered" 新注册 / "already_registered" 已有 (但 last_seen 更新).
+    status: String,
+}
+
+async fn tenant_register(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<RegisterResponse>> {
+    let tenant_id = tenant_id_from_headers(&headers);
+    let was_registered = state
+        .tenants
+        .is_registered(&tenant_id)
+        .await
+        .map_err(ApiError::from)?;
+    state
+        .tenants
+        .register(&tenant_id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(RegisterResponse {
+        tenant_id: tenant_id.clone(),
+        status: if was_registered {
+            "already_registered".to_string()
+        } else {
+            "registered".to_string()
+        },
+    }))
+}
+
+async fn tenant_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<TenantStatus>> {
+    let tenant_id = tenant_id_from_headers(&headers);
+    let status = state
+        .tenants
+        .status(&tenant_id)
+        .await
+        .map_err(ApiError::from)?;
+    match status {
+        Some(s) => Ok(Json(s)),
+        None => Err(ApiError::status(
+            StatusCode::NOT_FOUND,
+            "tenant 未注册. POST /tenant/register 注册",
+        )),
+    }
+}
+
+#[derive(Serialize)]
+struct DeletionResponse {
+    tenant_id: String,
+    deletion_scheduled_at: i64,
+    real_delete_at_human: String,
+}
+
+async fn tenant_request_deletion(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<DeletionResponse>> {
+    let tenant_id = ensure_registered(&headers, &state).await?;
+    let wait_secs = state.deletion_wait_days * 86400;
+    let schedule_at = chrono::Utc::now().timestamp() + wait_secs;
+    state
+        .tenants
+        .schedule_deletion(&tenant_id, schedule_at)
+        .await
+        .map_err(ApiError::from)?;
+    let human = chrono::DateTime::<chrono::Utc>::from_timestamp(schedule_at, 0)
+        .map_or_else(|| "unknown".to_string(), |dt| dt.to_rfc3339());
+    Ok(Json(DeletionResponse {
+        tenant_id,
+        deletion_scheduled_at: schedule_at,
+        real_delete_at_human: human,
+    }))
+}
+
+async fn tenant_cancel_deletion(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let tenant_id = ensure_registered(&headers, &state).await?;
+    state
+        .tenants
+        .cancel_deletion(&tenant_id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(serde_json::json!({
+        "tenant_id": tenant_id,
+        "deletion_scheduled_at": null,
+        "status": "cancelled"
+    })))
 }
 
 // ════════════════════════════════════════════════════════════════

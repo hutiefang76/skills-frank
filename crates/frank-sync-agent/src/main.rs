@@ -21,6 +21,7 @@ mod local_embedder;
 mod mock;
 mod routes;
 mod state;
+mod tenant;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -34,6 +35,10 @@ async fn main() -> Result<()> {
     let app_state = state::AppState::from_env()
         .await
         .context("init AppState from env")?;
+
+    // v0.12.0: 启动后台 retention worker (每小时扫一次到点的 tenant, 真删 qdrant + sqlite)
+    routes::spawn_retention_worker(app_state.clone());
+
     let app = routes::router(app_state);
 
     let listener = tokio::net::TcpListener::bind(bind)

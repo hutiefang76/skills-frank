@@ -27,6 +27,7 @@ pub mod doctor;
 pub mod enable;
 pub mod hook;
 pub mod import;
+pub mod tenant;
 pub mod install;
 pub mod list;
 pub mod login;
@@ -143,6 +144,9 @@ enum Commands {
 
     /// Claude Code PostToolUse hook 桥接 — 截 mcp__memory__* 转发到 frank-memory (v0.11 H).
     Hook(hook::Args),
+
+    /// Tenant 管理 — register / status / delete / cancel-delete (v0.12.0 用户隔离).
+    Tenant(tenant::Args),
 }
 
 /// CLI 入口 dispatcher。
@@ -190,6 +194,7 @@ pub fn run() -> Result<()> {
         Commands::Rollback => stub("rollback"),
         Commands::RefreshSkills(args) => refresh_skills::run(args),
         Commands::Hook(args) => hook::run(args),
+        Commands::Tenant(args) => tenant::run(args),
     }
 }
 

@@ -7,6 +7,7 @@ use std::env;
 use std::sync::Arc;
 
 use crate::local_embedder::LocalEmbedder;
+use crate::tenant::TenantStore;
 use anyhow::{Context, Result};
 use frank_memory::embed::openai::OpenAIEmbedder;
 use frank_memory::extract::claude::ClaudeExtractor;
@@ -23,6 +24,16 @@ pub struct AppState {
     /// 跨设备 skills state 同步: 每个 device_id 一份 state.json 透传 JSON。
     /// v0.4 内存版重启丢; v0.5 SQLite 持久化.
     pub skills_sync: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    /// v0.12.0: tenant registry + quota + deletion schedule (SQLite 持久化).
+    pub tenants: Arc<TenantStore>,
+    /// v0.12.0: per-tenant 配额上限 (default 10000 records). FRANK_QUOTA_PER_TENANT env.
+    pub quota_per_tenant: i64,
+    /// v0.12.0: 删除申请等待期 (default 14 day). FRANK_DELETION_WAIT_DAYS env.
+    pub deletion_wait_days: i64,
+    /// v0.12.0: qdrant 直 client (retention worker 真删 points 用).
+    pub qdrant_url: String,
+    /// v0.12.0: qdrant collection 名 (用于 retention delete by user_id filter).
+    pub qdrant_collection: String,
 }
 
 impl AppState {
@@ -49,7 +60,7 @@ impl AppState {
         let force_mock = matches!(env::var("FRANK_MEMORY_MOCK").as_deref(), Ok("1"));
 
         let store: Box<dyn MemoryStore> = Box::new(
-            QdrantStore::from_url(&qdrant_url, collection)
+            QdrantStore::from_url(&qdrant_url, collection.clone())
                 .with_context(|| format!("connect Qdrant at {qdrant_url}"))?,
         );
 
@@ -116,9 +127,32 @@ impl AppState {
         let cfg = MemoryConfig::new(store, embedder, extractor);
         let memory = Memory::new(cfg).await.context("init Memory")?;
 
+        // v0.12.0: 初始化 tenant SQLite. 默认 /var/lib/frank/tenants.db (容器 volume).
+        let tenant_db = env::var("FRANK_TENANT_DB")
+            .unwrap_or_else(|_| "/var/lib/frank/tenants.db".to_string());
+        tracing::info!(%tenant_db, "init tenant SQLite");
+        let tenants = TenantStore::open(&tenant_db)
+            .await
+            .with_context(|| format!("open tenant store {tenant_db}"))?;
+
+        let quota_per_tenant: i64 = env::var("FRANK_QUOTA_PER_TENANT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10_000);
+        let deletion_wait_days: i64 = env::var("FRANK_DELETION_WAIT_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(14);
+        tracing::info!(quota_per_tenant, deletion_wait_days, "tenant policy");
+
         Ok(Self {
             memory: Arc::new(memory),
             skills_sync: Arc::new(RwLock::new(HashMap::new())),
+            tenants: Arc::new(tenants),
+            quota_per_tenant,
+            deletion_wait_days,
+            qdrant_url,
+            qdrant_collection: collection,
         })
     }
 }

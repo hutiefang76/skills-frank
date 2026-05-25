@@ -40,6 +40,9 @@ volumes:
       type: none
       device: /opt/frank/models
       o: bind
+  # v0.12.0: tenant SQLite 持久化 (registry + quota + deletion schedule)
+  sync-agent-tenants:
+    driver: local
 
 services:
   qdrant:
@@ -82,6 +85,8 @@ services:
     volumes:
       # v0.10.10: 模型 host bind mount; 部署前必须先跑 deploy/scripts/init-models.sh
       - sync-agent-models:/home/nobody/.cache/huggingface
+      # v0.12.0: tenant SQLite 持久化目录
+      - sync-agent-tenants:/var/lib/frank
     environment:
       FRANK_BIND_ADDR: 0.0.0.0:3000
       FRANK_QDRANT_URL: http://qdrant:6334
