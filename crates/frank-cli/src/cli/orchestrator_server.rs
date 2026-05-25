@@ -198,53 +198,18 @@ async fn list_providers() -> Json<Vec<ProviderInfo>> {
     Json(out)
 }
 
-/// 每家 CLI 的 model 列表来源 — **只读本机文件 / 硬编码 alias, 不 spawn 任何子进程**。
+/// 每家 CLI 的 model 列表 — v0.10.8 改成调 `cli::ai::models::detect_models_for_ui`
+/// 跟 CLI 路径合一.
 ///
-/// 之前版本跑 `opencode models` 子进程, opencode 初始化时扫照片/音乐库/网络宗卷,
-/// macOS TCC 弹一堆 "frank 想访问 ..." 权限对话框 + daemon 卡死. 用户原话:
-/// "你干嘛了又在要访问权限?"
-///
-/// 现在所有 4 家全部 zero-IO 路径:
+/// 历史包袱 (留作注释提醒未来):
+/// - v0.10.6 跑 `opencode models` 子进程 → opencode 初始化扫照片/音乐库, macOS TCC
+///   弹一堆"frank 想访问 ..."权限框 + daemon 卡死. 用户原话: "你干嘛了又在要访问权限?"
+/// - v0.10.7 改成本文件硬编码 + 各自分支读不同 cache 文件. 但 CLI 那边 (`cli/ai/models.rs`)
+///   还在用另一份逻辑, 两条路径会漂.
+/// - v0.10.8: 删两边重复 — 全调 `sources::collect_all_for_provider` 一份, 来源 zero-IO
+///   (只读 ~/.claude/settings.json 等原生配置, 不 spawn 任何 CLI), 完全规避 TCC.
 fn detect_models(provider: &str) -> Vec<String> {
-    match provider {
-        // Anthropic 文档标准 alias (`claude --help`: "alias 'sonnet' or 'opus'")
-        "claude" => vec!["opus".into(), "sonnet".into(), "haiku".into()],
-        // codex 自家 cache 文件 (用户跑 codex login 后 CLI 写的, frank 只读)
-        "codex" => read_codex_models(),
-        // gemini CLI 没列模型命令, Google 公开 alias
-        "gemini" => vec![
-            "gemini-2.5-pro".into(),
-            "gemini-2.5-flash".into(),
-            "gemini-2.0-flash".into(),
-        ],
-        // opencode 没有本地 model cache 文件, 也不能 spawn `opencode models` (会触发 TCC).
-        // 返回空 → UI 提示"用 CLI 默认 model 或手输 model 名".
-        // 用户跑 `opencode models` 看 model 名 (在自己终端, 跟 daemon 隔离).
-        // _ 分支 fallthrough: opencode + 其他未识别 provider 都给空, 用户手输.
-        _ => Vec::new(),
-    }
-}
-
-fn read_codex_models() -> Vec<String> {
-    let Some(home) = dirs::home_dir() else {
-        return Vec::new();
-    };
-    let path = home.join(".codex").join("models_cache.json");
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Vec::new();
-    };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return Vec::new();
-    };
-    v.get("models")
-        .and_then(serde_json::Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|m| m.get("slug").and_then(serde_json::Value::as_str))
-                .map(String::from)
-                .collect()
-        })
-        .unwrap_or_default()
+    crate::cli::ai::models::detect_models_for_ui(provider)
 }
 
 async fn list_jobs(State(s): State<AppState>) -> Json<Vec<JobSummary>> {
