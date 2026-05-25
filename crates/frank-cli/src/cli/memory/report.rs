@@ -6,14 +6,13 @@
 //! 客户端拿不到 OpenAI 真实的 token 计数。两个选项:
 //!
 //! 1. 改 wire protocol 让 sync-agent 在响应里带 token usage — 跨 crate 大改, 留 Phase 3.
-//! 2. **本文件**: 客户端按 char/4 估算 input_tokens (mem0 / tiktoken 经验比例),
-//!    `Confidence::Low` 显式标"估算", `cost_usd = None` 不误导用户。
+//! 2. **本文件**: 客户端按 char/4 估算 input_tokens (mem0 / tiktoken 经验比例)。
 //!
 //! 选 2 — 用户立刻看到 latency + 大致 token, 真要精确等 Phase 3 服务端透出。
 
 use std::time::Instant;
 
-use frank_cred::report::{CallReport, CallSource, Confidence};
+use frank_cred::report::{CallReport, CallSource};
 
 /// 近似 token 估算: 1 token ≈ 4 chars (mem0 / OpenAI 经验比例)。
 ///
@@ -48,14 +47,12 @@ pub fn build_memory_report(
         model: "text-embedding-3-small".to_string(),
         input_tokens,
         output_tokens,
-        cost_usd: None, // 客户端无服务端真实 usage, 不算 cost 避免误导
         latency_ms,
         session_id: None,
         source: CallSource::RemoteQdrant {
             endpoint: endpoint.to_string(),
         },
         timestamp: chrono::Utc::now(),
-        confidence: Confidence::Low, // chars/4 估算 + 无 cost
     }
 }
 
@@ -113,12 +110,10 @@ mod tests {
     }
 
     #[test]
-    fn build_report_uses_low_confidence_no_cost() {
+    fn build_report_basics() {
         let r = build_memory_report("search", "test query", "https://x.test", 100, 0);
         assert_eq!(r.provider, "frank-memory");
         assert_eq!(r.model, "text-embedding-3-small");
-        assert_eq!(r.confidence, Confidence::Low);
-        assert!(r.cost_usd.is_none());
         assert_eq!(r.latency_ms, 100);
         // chars=10 → 3 tokens (ceil)
         assert_eq!(r.input_tokens, 3);

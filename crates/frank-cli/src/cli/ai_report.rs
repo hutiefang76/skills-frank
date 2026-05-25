@@ -1,13 +1,18 @@
-//! `frank ai ask` 的 CLI 输出解析 — claude/codex JSON 提取 token+cost+session, 构造 `CallReport`。
+//! `frank ai ask` 的 CLI 输出解析 — claude/codex JSON 提取 token+session, 构造 `CallReport`。
 //!
 //! 输入: claude `--output-format json` 单行 JSON; codex `--json` JSONL 流。
 //! 输出: `(reply_text, Option<CallReport>)` — 解析失败时 `report = None`, reply 走 raw,
 //! **永不阻塞用户拿到回答** (CLI 版本 skew / 字段变化 / JSON 损坏都静默 fallback)。
 //!
+//! # 为什么不算 cost
+//!
+//! v0.10.5 实施后用户反馈: 中转站 (proxy / 共享账号) 价格跟官方不一样, 2026 年官方
+//! 定价也会动好几次。frank 不知道用户走哪个 endpoint, 算成本反而是误导。**只输出
+//! token 数**, 用户自己换算更准。
+//!
 //! TODO v0.11+: gemini/opencode token parsing — 当前用户主流是 claude/codex, 留空。
 
-use frank_cred::pricing::{compute_cost, PricingTable};
-use frank_cred::report::{CallReport, CallSource, Confidence};
+use frank_cred::report::{CallReport, CallSource};
 use serde_json::Value;
 
 /// 默认 claude provider 字段值。
@@ -27,7 +32,6 @@ const UNKNOWN_MODEL: &str = "unknown";
 ///   "session_id": "uuid",
 ///   "usage": { "input_tokens": 8, "output_tokens": 5,
 ///              "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0 },
-///   "total_cost_usd": 0.0001,
 ///   "duration_ms": 1234
 /// }
 /// ```
@@ -61,12 +65,6 @@ pub fn parse_claude_json(raw: &str, fallback_latency_ms: u64) -> (String, Option
         )
     });
 
-    // claude 自家给了 total_cost_usd 优先用 (跟 anthropic 后台对得上)
-    let cost_usd = v
-        .get("total_cost_usd")
-        .and_then(Value::as_f64)
-        .or_else(|| pricing_lookup_cost(&model, input_tokens, output_tokens));
-
     let latency_ms = v
         .get("duration_ms")
         .and_then(Value::as_u64)
@@ -77,18 +75,12 @@ pub fn parse_claude_json(raw: &str, fallback_latency_ms: u64) -> (String, Option
         model,
         input_tokens,
         output_tokens,
-        cost_usd,
         latency_ms,
         session_id,
         source: CallSource::SpawnedCli {
             bin: "claude".to_string(),
         },
         timestamp: chrono::Utc::now(),
-        confidence: if cost_usd.is_some() {
-            Confidence::High
-        } else {
-            Confidence::Low
-        },
     };
     (reply, Some(report))
 }
@@ -196,36 +188,19 @@ pub fn parse_codex_jsonl(
         reply = raw.to_string();
     }
 
-    let cost_usd = pricing_lookup_cost(&model, input_tokens, output_tokens);
-    let confidence = if cost_usd.is_some() {
-        Confidence::Med // codex 无官方 cost, pricing 表的 gpt-5.5 标 med
-    } else {
-        Confidence::Low
-    };
-
     let report = CallReport {
         provider: PROVIDER_CODEX.to_string(),
         model,
         input_tokens,
         output_tokens,
-        cost_usd,
         latency_ms: fallback_latency_ms,
         session_id: thread_id,
         source: CallSource::SpawnedCli {
             bin: "codex".to_string(),
         },
         timestamp: chrono::Utc::now(),
-        confidence,
     };
     (reply, Some(report))
-}
-
-/// pricing 表查 model → cost。未知模型返 `None` (调用方决定 fallback)。
-fn pricing_lookup_cost(model: &str, input: u64, output: u64) -> Option<f64> {
-    let table = PricingTable::load_with_override();
-    table
-        .lookup(model)
-        .map(|rates| compute_cost(input, output, rates))
 }
 
 #[cfg(test)]
@@ -239,7 +214,6 @@ mod tests {
             "model": "claude-sonnet-4-6",
             "session_id": "abc12345-def6-7890",
             "usage": {"input_tokens": 8, "output_tokens": 5},
-            "total_cost_usd": 0.0001,
             "duration_ms": 1234
         }"#;
         let (reply, report) = parse_claude_json(raw, 9999);
@@ -249,7 +223,6 @@ mod tests {
         assert_eq!(r.model, "claude-sonnet-4-6");
         assert_eq!(r.input_tokens, 8);
         assert_eq!(r.output_tokens, 5);
-        assert_eq!(r.cost_usd, Some(0.0001));
         assert_eq!(r.latency_ms, 1234);
         assert_eq!(r.session_id.as_deref(), Some("abc12345-def6-7890"));
     }
@@ -263,23 +236,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_claude_json_fallback_when_no_total_cost() {
-        // total_cost_usd 缺 → 走 pricing 表算
-        let raw = r#"{
-            "result": "hi",
-            "model": "claude-sonnet-4-6",
-            "session_id": "s",
-            "usage": {"input_tokens": 1000000, "output_tokens": 0}
-        }"#;
-        let (_, report) = parse_claude_json(raw, 200);
-        let r = report.unwrap();
-        // 1M input @ $3/M = $3.00 (sonnet-4-6)
-        assert!((r.cost_usd.unwrap() - 3.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn parse_claude_json_unknown_model_no_cost() {
-        // model 不在 pricing 表 → cost = None, confidence = Low
+    fn parse_claude_json_unknown_model_still_reports_tokens() {
+        // 即使 model 未知, token 数仍要上报 (用户照看)
         let raw = r#"{
             "result": "hi",
             "model": "claude-future-9",
@@ -287,8 +245,9 @@ mod tests {
         }"#;
         let (_, report) = parse_claude_json(raw, 100);
         let r = report.unwrap();
-        assert!(r.cost_usd.is_none());
-        assert_eq!(r.confidence, Confidence::Low);
+        assert_eq!(r.model, "claude-future-9");
+        assert_eq!(r.input_tokens, 10);
+        assert_eq!(r.output_tokens, 5);
     }
 
     #[test]
@@ -312,7 +271,6 @@ mod tests {
 
     #[test]
     fn parse_codex_jsonl_model_hint_overrides_default() {
-        // --model gpt-5.5-pro 时 hint 应进 model
         let raw = r#"{"type":"thread.started","thread_id":"x"}
 {"type":"item.completed","item":{"type":"agent_message","text":"hi"}}
 {"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":1}}"#;
@@ -337,7 +295,6 @@ mod tests {
 
     #[test]
     fn parse_codex_jsonl_nested_msg_format() {
-        // 嵌套 `msg.{...}` 兼容
         let raw = r#"{"id":"1","msg":{"type":"thread.started","thread_id":"abc"}}
 {"id":"2","msg":{"type":"agent_message_delta","delta":"yo"}}
 {"id":"3","msg":{"type":"turn.completed","usage":{"input_tokens":4,"output_tokens":1}}}"#;
@@ -350,7 +307,6 @@ mod tests {
 
     #[test]
     fn parse_codex_jsonl_agent_message_overrides_delta() {
-        // 末尾 agent_message 完整, 应替换 delta 累积
         let raw = r#"{"type":"agent_message_delta","delta":"partial"}
 {"type":"agent_message","message":"complete reply"}
 {"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":2}}"#;
@@ -368,7 +324,6 @@ mod tests {
 
     #[test]
     fn parse_codex_jsonl_empty_reply_falls_back_to_raw() {
-        // 只有 turn.completed 没 delta/message → reply 空, 应 fallback raw
         let raw = r#"{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":0}}"#;
         let (reply, report) = parse_codex_jsonl(raw, 100, "");
         assert_eq!(reply, raw); // fallback

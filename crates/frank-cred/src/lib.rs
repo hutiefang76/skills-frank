@@ -45,7 +45,6 @@
 pub mod env;
 pub mod kind;
 pub mod official;
-pub mod pricing;
 pub mod provider;
 pub mod redact;
 pub mod report;
@@ -61,7 +60,7 @@ use serde::{Deserialize, Serialize};
 pub use kind::{ExportStrategy, TokenKind};
 pub use provider::Provider;
 pub use redact::{redact_secrets, RedactWriter};
-pub use report::{CallReport, CallSource, Confidence};
+pub use report::{CallReport, CallSource};
 
 /// 一条凭据 (含 provider / kind / 来源元数据)。
 ///
