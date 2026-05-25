@@ -92,5 +92,5 @@ docker compose -f deploy/test-stack/docker-compose.yml --profile streampark down
 ## 已知问题
 
 - StreamPark 2.1.4 镜像首次启动会跑 SQL 初始化, 慢 (~90s)。`healthcheck` 阶段不要中断
-- `sp_deploy_batch.py` 的默认值面向 KDWL 内部 (Flink 镜像 `10.0.0.15:58070/...` 等), demo 跑会失败 — 这命令不适合 demo, 只 list/show 能 demo
+- `sp_deploy_batch.py` 的默认值面向 KDWL 内部 (Flink 镜像走内部 Harbor registry), demo 跑会失败 — 这命令不适合 demo, 只 list/show 能 demo
 - 如果你 docker desktop 没装/没起, `frank doctor` 会标 docker 缺失 — v0.8+ 实现

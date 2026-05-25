@@ -124,10 +124,7 @@ fn set_key(key: &str, value: &str) -> Result<()> {
         anyhow::bail!("键不能为空");
     }
     // 简易校验 sync.agent_url 是否像 URL (其他键不强校)
-    if key == "sync.agent_url"
-        && !value.starts_with("http://")
-        && !value.starts_with("https://")
-    {
+    if key == "sync.agent_url" && !value.starts_with("http://") && !value.starts_with("https://") {
         anyhow::bail!("sync.agent_url 必须以 http:// 或 https:// 开头, 收到 `{value}`");
     }
 
@@ -186,9 +183,7 @@ fn set_dotpath(root: &mut toml::Value, key: &str, value: toml::Value) -> Result<
     if segs.iter().any(|s| s.is_empty()) {
         anyhow::bail!("键格式错: `{key}` (段不能空)");
     }
-    let table = root
-        .as_table_mut()
-        .context("config root 必须是 table")?;
+    let table = root.as_table_mut().context("config root 必须是 table")?;
     if segs.len() == 1 {
         table.insert(segs[0].into(), value);
         return Ok(());
@@ -375,8 +370,12 @@ mod tests {
     #[test]
     fn set_get_dotpath_roundtrip() {
         let mut v: toml::Value = toml::Value::Table(toml::map::Map::new());
-        set_dotpath(&mut v, "sync.agent_url", toml::Value::String("http://x:1".into()))
-            .expect("set");
+        set_dotpath(
+            &mut v,
+            "sync.agent_url",
+            toml::Value::String("http://x:1".into()),
+        )
+        .expect("set");
         let got = get_dotpath(&v, "sync.agent_url").expect("get");
         assert_eq!(val_to_string(got), "http://x:1");
     }
