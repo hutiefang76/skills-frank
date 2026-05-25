@@ -1,9 +1,67 @@
 # Frank 进度记录
 
-> **当前状态**：P0 完整 ✅ + P5/P6 启动 (workspace + frank-memory + frank-sync-agent + qdrant on tx)
-> **日期**：2026-05-21 (夜班至 23:00)
-> **下次开工**：P0 Day 5 (CI smoke + v0.1.0 tag); 或继续 P5/P6 (mem0 端到端真测 / orchestrator 实现)
-> **GitHub**：[github.com/hutiefang76/skills-frank](https://github.com/hutiefang76/skills-frank) · main = `clippy 0-warning + 真跑通`
+> **当前状态 (2026-05-25)**: v0.10.10 已 ship + tx 部署完成。**v0.11 待启动 (核心差异化, 6-7 天)**
+> **GitHub**: [github.com/hutiefang76/skills-frank](https://github.com/hutiefang76/skills-frank) · 222 tests pass · clippy 0 warnings
+> **Homebrew**: `brew install hutiefang76/frank/frank` (v0.10.10)
+> **服务端**: `https://frank.hutiefang.com` (tx, 真模式 fastembed BGE-small)
+
+---
+
+## 🎯 当前节点速览 (2026-05-25)
+
+### 已完成 (Phase 1-4)
+- ✅ **P0** — skill/MCP 治理 (install/list/enable/disable/scan/import/dedupe), 跨 Claude/codex/opencode
+- ✅ **P0+** — Homebrew tap + frank ui + frank login + 5 层凭据桥 (ADR-009)
+- ✅ **P5 服务端基础** — frank-memory crate (LocalEmbedder fastembed) + frank-sync-agent docker on tx
+- ✅ **P5 体验** — Web UI (skills/memory/history tab) + frank doctor 全景 + 动态 model 加载
+- ✅ **P5 部署体验** — v0.10.10 镜像 572MB→111MB + 一键自建脚本 + frank config set sync.agent_url
+- ✅ **P6 骨架** — frank-orchestrator daemon + WebSocket (M1/M2 跑通,但实际未用)
+
+### **未做 (真正的差异化)**
+- ❌ **本地 LanceDB 主存** (POSITION #1 倒置存储)
+- ❌ **Hybrid Retrieval 4 路 + RRF** (POSITION #4 召回质量)
+- ❌ **extractor auto-detect** (POSITION #2 用用户当前 AI 抽)
+- ❌ **PostToolUse hook** 截 mcp__memory (零成本切换路径)
+- ❌ **多设备同步 + 用户隔离** (POSITION 第 0 优先级)
+- ❌ **三类记忆 / 三层 session** (LangMem / Letta 对标)
+- ❌ **MCP server 协议兼容** (frank-mem MCP, mcp_memory 100% 兼容)
+
+### 下一步 (v0.11)
+看 `docs/phases/PHASE-9-PLAN.md` — 7 天 5 个子项 (A/B/E/H + G), 2 个 Agent 并行 4 wave.
+
+---
+
+## 📊 真实数字 (截至 2026-05-25)
+
+| 维度 | 状态 |
+|---|---|
+| Releases | v0.1.0 → v0.10.10 (16 个版本) |
+| Tests | 222 pass, 0 fail, clippy 0 warnings |
+| Crates | 4 (frank-cli / frank-memory / frank-sync-agent / frank-cred / frank-orchestrator skeleton) |
+| ADR | 9 个 (001-009 都 in main) |
+| 平台覆盖 | macOS arm/x64 + Linux arm/x64 + Windows arm/x64 (Win 没真测过) |
+| Docker | sync-agent 111MB, ghcr.io + GitHub Release tar.gz |
+| 部署 | tx (https://frank.hutiefang.com:8318) 真跑 |
+
+---
+
+## 🟡 偏离与教训 (2026-05-25 用户提醒)
+
+**用户原话**: "我发现弄了很久又开始脱离一开始的目标了"
+
+**复盘**: v0.10.4-v0.10.10 (一个月) 全部花在体验补漏 + 部署优化。**没有一行代码是真正的"比 mcp_memory 强"。**
+
+**根因**: 我每次都被"刚发现的坑"牵着走 (TCC 坑 → fmt 挂 → 镜像太大 → 默认 URL 泄漏 → 等等)。**没有定期回头看 POSITION.md。**
+
+**v0.11 起的规矩**:
+1. 每次 commit message 末尾必须答: "这条改动跟 POSITION.md 哪一行对齐?"
+2. 每周做一次 POSITION 回顾, 偏离了就停所有非定位项
+3. ❌ 不再做"全面性"补漏 (像 v0.10.10 这种部署体验)
+4. 减配优先 — D/C/F 砍到 v0.12 就别在 v0.11 硬塞
+
+---
+
+## 📜 历史夜班记录 (旧)
 
 ## 🌙 夜班记录 (2026-05-21 21:00 → 23:00)
 
