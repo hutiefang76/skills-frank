@@ -53,26 +53,25 @@ pub fn run_add(client: &SyncClient, args: AddArgs) -> Result<()> {
     }
     let metadata = parse_metadata(args.metadata)?;
 
-    // v0.11 E: --extract-with 默认 auto, 自动选可用 cli; none 显式禁用 (走服务端抽).
+    // v0.11.2: auto 模式按优先级试多个 cli, 任一失败自动跳下一个, 全挂 fallback "none" 走服务端.
     let raw_extract = args.extract_with.trim().to_lowercase();
-    let extract = if raw_extract == "auto" {
-        // 优先级: FRANK_AI_PROVIDER env > claude > codex > gemini > none
-        if let Ok(env_provider) = std::env::var("FRANK_AI_PROVIDER") {
-            let p = env_provider.trim().to_lowercase();
-            if !p.is_empty() && which::which(&p).is_ok() {
-                p
-            } else {
-                detect_first_available_cli().unwrap_or_else(|| "none".to_string())
-            }
-        } else {
-            detect_first_available_cli().unwrap_or_else(|| "none".to_string())
-        }
+    let (facts, used) = if raw_extract == "auto" {
+        try_extract_with_fallback(&args.content)
+    } else if raw_extract == "none" || raw_extract.is_empty() {
+        (None, "none".to_string())
     } else {
-        raw_extract
+        // 显式指定单个 cli — 不 fallback (尊重用户意图)
+        match extract_facts_via_cli(&raw_extract, &args.content) {
+            Ok(f) => (Some(f), raw_extract),
+            Err(e) => {
+                crate::log::ui::warn(&format!("`{raw_extract}` 抽取失败: {e:#}"));
+                crate::log::ui::info("提示: 跑 `frank memory add ... --extract-with=auto` 让 frank 自动 fallback");
+                (None, raw_extract)
+            }
+        }
     };
-    if extract != "none" && !extract.is_empty() {
-        crate::log::ui::info(&format!("extractor: {extract} (set --extract-with=none to disable)"));
-        let facts = extract_facts_via_cli(&extract, &args.content)?;
+    if let Some(facts) = facts {
+        let extract = &used;
         if facts.is_empty() {
             crate::log::ui::warn("extract returned 0 facts; nothing stored");
             return Ok(());
@@ -110,17 +109,54 @@ pub fn run_add(client: &SyncClient, args: AddArgs) -> Result<()> {
 ///
 /// prompt 模板借 mem0 (Apache 2.0): 强 JSON schema, 每条短句独立可 embed.
 /// 调 cli 用各家 `--print` / `exec` 非交互 flag (跟 `frank ai ask` 一致).
-/// v0.11 E: 探用户本机第一个可用的 cli (按优先级).
+/// v0.11.2: auto 模式按优先级串行尝试 cli, 任一失败 (exit 1 / 没装) 自动滑到下一个,
+/// 全挂则返回 (None, "none") 表示让上层走服务端抽.
 ///
-/// 优先级排序参考 POSITION.md #2 (用用户当前 AI) — Claude 优先, codex/gemini 退而求其次.
-/// 返回 None 表示全没装, 调用方应 fallback "none" (走服务端抽).
-fn detect_first_available_cli() -> Option<String> {
-    for candidate in ["claude", "codex", "gemini"] {
-        if which::which(candidate).is_ok() {
-            return Some(candidate.to_string());
+/// 返回 (Some(facts), used_cli_name) 表示某个 cli 抽成功了; (None, "none") 表示全挂 fallback.
+fn try_extract_with_fallback(content: &str) -> (Option<Vec<String>>, String) {
+    // 优先级 (跟 detect_first_available_cli 一致, FRANK_AI_PROVIDER 可覆盖)
+    let mut candidates: Vec<String> = vec![];
+    if let Ok(p) = std::env::var("FRANK_AI_PROVIDER") {
+        let p = p.trim().to_lowercase();
+        if !p.is_empty() {
+            candidates.push(p);
         }
     }
-    None
+    for c in ["claude", "codex", "gemini"] {
+        if !candidates.contains(&c.to_string()) {
+            candidates.push(c.to_string());
+        }
+    }
+
+    let mut errors: Vec<(String, String)> = vec![];
+    for cli in &candidates {
+        if which::which(cli).is_err() {
+            continue;
+        }
+        crate::log::ui::info(&format!("extractor: 尝试 {cli}"));
+        match extract_facts_via_cli(cli, content) {
+            Ok(facts) => return (Some(facts), cli.clone()),
+            Err(e) => {
+                let short = format!("{e:#}")
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                crate::log::ui::warn(&format!("  `{cli}` 抽取失败: {short}"));
+                errors.push((cli.clone(), short));
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        crate::log::ui::info("没装任何 cli (claude/codex/gemini), 走服务端兜底抽");
+    } else {
+        crate::log::ui::warn(&format!(
+            "所有 {} 个 cli 抽取都失败, fallback 服务端 (服务端无 ANTHROPIC_KEY 会走 mock 按行存)",
+            errors.len()
+        ));
+    }
+    (None, "none".to_string())
 }
 
 fn extract_facts_via_cli(cli: &str, content: &str) -> Result<Vec<String>> {

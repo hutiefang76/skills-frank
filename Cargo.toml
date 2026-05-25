@@ -12,7 +12,7 @@ resolver = "2"
 
 # ---- 工作区共享元数据 (子 crate 用 `version.workspace = true` 引用) ----
 [workspace.package]
-version = "0.11.1"
+version = "0.11.2"
 edition = "2021"
 rust-version = "1.75"
 authors = ["hutiefang <hutiefang@icloud.com>"]
