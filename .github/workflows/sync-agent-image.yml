@@ -31,6 +31,11 @@ on:
       - '.github/workflows/sync-agent-image.yml'
     tags: ['v*.*.*']
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '附加 docker tar.gz 到现有 release tag (例: v0.10.10). 留空则不上传.'
+        required: false
+        default: ''
 
 env:
   REGISTRY: ghcr.io
@@ -73,13 +78,56 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/sync-agent.Dockerfile
           platforms: linux/amd64    # tx 是 x86_64, 不需要 arm64
           push: true
+          load: false               # 多平台不支持 push+load, 我们后面单独 pull
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # v0.10.11: 把 image 保存成 tar.gz, 上传到 GitHub Release.
+      # 国内 (tx) 拉 ghcr.io 经常 timeout, 走 release CDN 通常很稳.
+      # 仅在 tag push 或 workflow_dispatch + release_tag 时上传 (避免 main push 每次都传).
+      - name: Determine release tag
+        id: reltag
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != ''
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.release_tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "==> 将上传到 release: $TAG"
+
+      - name: Save image as tar.gz
+        if: steps.reltag.outputs.tag != ''
+        run: |
+          set -e
+          TAG="${{ steps.reltag.outputs.tag }}"
+          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
+          echo "==> pull $IMG"
+          docker pull "$IMG"
+          mkdir -p dist
+          OUT="dist/frank-sync-agent-${TAG}-linux-amd64.tar.gz"
+          echo "==> save to $OUT"
+          docker save "$IMG" | gzip > "$OUT"
+          ls -lh "$OUT"
+          shasum -a 256 "$OUT" > "$OUT.sha256"
+          cat "$OUT.sha256"
+
+      - name: Upload tar.gz to GitHub Release
+        if: steps.reltag.outputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.reltag.outputs.tag }}
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+          fail_on_unmatched_files: true
