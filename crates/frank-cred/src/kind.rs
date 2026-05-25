@@ -51,24 +51,37 @@ pub enum ExportStrategy {
 impl TokenKind {
     /// 推导该 token 对应 provider 的 export 策略。
     ///
-    /// # V3 实施修订 (2026-05-24, ADR-009 实施过程发现)
+    /// # V4 实施修订 (2026-05-25, v0.11.2 实测用户报错后)
     ///
     /// V2 设计: OAuthSession 走 `PreserveOfficialFile` (不注 env, 让 child 自己读 file)。
+    /// V3 修订: 全部 InjectEnv (因为同进程链 Keychain ACL 拿不到, 注 env 才能给 child)。
+    /// **V3 错了**: claude --print 见到 `ANTHROPIC_API_KEY` 会把它当 *long-lived API key*
+    /// 调 api.anthropic.com, 但 OAuth session token 不是 API key 格式, 直接 401.
     ///
-    /// 实测发现: child CLI (claude --print) **同样** 因 macOS Keychain ACL 在
-    /// 非 Anthropic 信任进程链中拿不到 token (它自己也是 keyring crate 调 Keychain)。
-    /// 不注 env = child 也读不到 = 等于没修。
+    /// 实际现象 (用户实测):
+    /// ```text
+    /// $ frank ai ask --to claude --model sonnet "你好"
+    /// [frank-cred] OK ANTHROPIC_API_KEY (source: keyring:Claude Code-credentials)
+    /// ERROR `claude` exit 1
+    /// ```
+    /// 而 `claude --print "你好"` 直接跑没问题 (走自家 keychain ACL OK).
     ///
-    /// V3: OAuthSession **也** InjectEnv (Anthropic 非交互模式 `claude --print` 见
-    /// `ANTHROPIC_API_KEY` 就用, 不论 long-lived 还是 OAuth)。安全考量:
-    /// - OAuth scope (`user:inference, user:mcp_servers` 等) 内部使用, 不算 scope 泄漏
-    /// - frank 是合法 wrap, scope 同源
-    /// - 失效风险: doctor 显示 `expires_at`, 失效前 7 天警告刷新
+    /// V4 修复: OAuthSession 回 `PreserveOfficialFile` — frank 不注 env,
+    /// child claude 用自己 keychain 走自己 OAuth, **不被 frank 干扰**。
+    /// `LongLivedApiKey` (`sk-ant-` / `sk-` 开头) 仍 InjectEnv (那才是 child 期望的格式).
+    /// `ThirdPartyProxy` 仍 InjectEnv (代理 key 就是 API key 形态).
     #[must_use]
     pub fn export_strategy(self, provider: Provider) -> ExportStrategy {
-        // V3: 三类都注 env, 差别仅在 doctor 显示警告 (OAuth 显示 expires_at).
-        let _ = self; // 留 enum 区分供未来策略 (例 file-based child auth)
-        ExportStrategy::InjectEnv(provider.env_var_name().to_string())
+        match self {
+            Self::LongLivedApiKey | Self::ThirdPartyProxy => {
+                ExportStrategy::InjectEnv(provider.env_var_name().to_string())
+            }
+            Self::OAuthSession => {
+                // 不注 env, 让 child CLI 用自己的 keychain OAuth session.
+                // 注: 同时 inject_per_kind 会调 strip_empty_api_keys 清掉继承的空值, 防 trap.
+                ExportStrategy::PreserveOfficialFile
+            }
+        }
     }
 
     /// 从原始 token 字符串启发式判断 kind (用于 import / migration)。
@@ -101,13 +114,11 @@ mod tests {
     }
 
     #[test]
-    fn oauth_session_also_injects_env_v3() {
-        // V3 修订: OAuth 也注 env (V2 的 PreserveOfficialFile 实测不工作 — child 同 ACL 问题)
+    fn oauth_session_preserves_official_file_v4() {
+        // V4 修复 (v0.11.2): OAuth 不注 env, claude 用自己 keychain.
+        // V3 的注 env 让 claude 把 OAuth session 当 API key 调 → 401.
         let strat = TokenKind::OAuthSession.export_strategy(Provider::Claude);
-        assert_eq!(
-            strat,
-            ExportStrategy::InjectEnv("ANTHROPIC_API_KEY".to_string())
-        );
+        assert_eq!(strat, ExportStrategy::PreserveOfficialFile);
     }
 
     #[test]

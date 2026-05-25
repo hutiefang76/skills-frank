@@ -167,11 +167,16 @@ pub type Result<T> = std::result::Result<T, CredError>;
 pub trait CommandEnv {
     /// 设置子进程 env var。
     fn set_env(&mut self, key: &str, value: &str);
+    /// 删除子进程 env var (v0.11.2 OAuth 路径需要清空 inherited shell 的 *_API_KEY 防 401)。
+    fn remove_env(&mut self, key: &str);
 }
 
 impl CommandEnv for std::process::Command {
     fn set_env(&mut self, key: &str, value: &str) {
         self.env(key, value);
+    }
+    fn remove_env(&mut self, key: &str) {
+        std::process::Command::env_remove(self, key);
     }
 }
 
@@ -182,6 +187,9 @@ impl CommandEnv for std::process::Command {
 impl CommandEnv for tokio::process::Command {
     fn set_env(&mut self, key: &str, value: &str) {
         self.env(key, value);
+    }
+    fn remove_env(&mut self, key: &str) {
+        tokio::process::Command::env_remove(self, key);
     }
 }
 
@@ -254,7 +262,18 @@ fn inject_per_kind<C: CommandEnv>(
             }
         }
         ExportStrategy::PreserveOfficialFile => {
-            // OAuth session — 不注 env, child CLI 自己走 file path
+            // V4 (v0.11.2): OAuth session — 不注 env, child CLI 用自己 keychain.
+            // 同时清掉继承 shell 里的空 *_API_KEY (防 401 陷阱).
+            for env_key in &[
+                "ANTHROPIC_API_KEY",
+                "OPENAI_API_KEY",
+                "GEMINI_API_KEY",
+                "GOOGLE_API_KEY",
+            ] {
+                if std::env::var(env_key).is_ok_and(|v| v.trim().is_empty()) {
+                    cmd.remove_env(env_key);
+                }
+            }
             tracing::debug!("frank-cred 检测到 OAuthSession, 不注 env (来源: {source})");
             InjectReport {
                 source,
