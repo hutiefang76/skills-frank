@@ -129,4 +129,11 @@ mod tests {
         let json = r#"{"apiKey": "fake"}"#;
         assert!(parse(json).is_none());
     }
+
+    #[test]
+    fn read_missing_file_returns_none_no_panic() {
+        // 直接调 read() 在没有 ~/.gemini/settings.json 的临时环境 → 应静默返回 None.
+        // 这里仅验 read() 调用不 panic; 真实路径依赖用户 HOME, 不强制 None.
+        let _ = read();
+    }
 }

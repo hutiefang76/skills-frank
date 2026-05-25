@@ -91,16 +91,15 @@ mod tests {
 
     fn parse(json: &str) -> Option<OfficialMcp> {
         let root: Value = serde_json::from_str(json).expect("test json valid");
-        detect_in_servers(&root, "mcpServers")
-            .or_else(|| {
-                root.get("projects")
-                    .and_then(Value::as_object)
-                    .and_then(|projects| {
-                        projects
-                            .values()
-                            .find_map(|p| detect_in_servers(p, "mcpServers"))
-                    })
-            })
+        detect_in_servers(&root, "mcpServers").or_else(|| {
+            root.get("projects")
+                .and_then(Value::as_object)
+                .and_then(|projects| {
+                    projects
+                        .values()
+                        .find_map(|p| detect_in_servers(p, "mcpServers"))
+                })
+        })
     }
 
     #[test]
@@ -153,6 +152,32 @@ mod tests {
     #[test]
     fn empty_config_no_detection() {
         let json = r"{}";
+        assert!(parse(json).is_none());
+    }
+
+    #[test]
+    fn missing_command_field_no_detection() {
+        let json = r#"{
+          "mcpServers": {
+            "memory": {
+              "args": ["-y", "@modelcontextprotocol/server-memory"]
+            }
+          }
+        }"#;
+        // command 缺失 → unwrap_or("") → is_official 拒绝, 故 None
+        assert!(parse(json).is_none());
+    }
+
+    #[test]
+    fn empty_args_array_no_detection() {
+        let json = r#"{
+          "mcpServers": {
+            "memory": {
+              "command": "npx",
+              "args": []
+            }
+          }
+        }"#;
         assert!(parse(json).is_none());
     }
 }

@@ -140,7 +140,11 @@ fn print_memory_inspection() {
             .as_ref()
             .map_or_else(|| "(no home)".to_string(), |p| short_path(p));
         let mem_label = memory_status_label(s);
-        println!("  • {:<10} {:<38} {mem_label}", s.provider.name(), path_label);
+        println!(
+            "  • {:<10} {:<38} {mem_label}",
+            s.provider.name(),
+            path_label
+        );
     }
 
     println!();

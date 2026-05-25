@@ -180,8 +180,12 @@ impl Recommendation {
         match self {
             Self::NoChange => "无 official memory MCP 冲突, frank CLI 已接管",
             Self::DisableOfficial => "建议禁用 official memory MCP, 让 frank-memory 接管",
-            Self::InstallFrank => "未装 frank, 也无 memory MCP — 建议 `brew install frank` 启用统一记忆库",
-            Self::KeepBoth => "official memory MCP 已装, 无 frank CLI; 保持现状 (装 frank 再来 doctor 看建议)",
+            Self::InstallFrank => {
+                "未装 frank, 也无 memory MCP — 建议 `brew install frank` 启用统一记忆库"
+            }
+            Self::KeepBoth => {
+                "official memory MCP 已装, 无 frank CLI; 保持现状 (装 frank 再来 doctor 看建议)"
+            }
         }
     }
 
@@ -319,7 +323,10 @@ mod tests {
 
     #[test]
     fn is_official_npx_modelcontextprotocol() {
-        let args = vec!["-y".to_string(), "@modelcontextprotocol/server-memory".to_string()];
+        let args = vec![
+            "-y".to_string(),
+            "@modelcontextprotocol/server-memory".to_string(),
+        ];
         assert!(is_official("npx", &args));
     }
 

@@ -114,4 +114,25 @@ mod tests {
         "#;
         assert!(parse(toml).is_none());
     }
+
+    #[test]
+    fn enabled_true_no_disable_flag() {
+        let toml = r#"
+            [mcp_servers.memory]
+            command = "npx"
+            args = ["-y", "@modelcontextprotocol/server-memory"]
+            enabled = true
+        "#;
+        let res = parse(toml).expect("should detect");
+        assert!(!res.disabled);
+    }
+
+    #[test]
+    fn no_mcp_servers_section_returns_none() {
+        let toml = r#"
+            [other_section]
+            foo = "bar"
+        "#;
+        assert!(parse(toml).is_none());
+    }
 }

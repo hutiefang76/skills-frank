@@ -72,10 +72,7 @@ fn detect(root: &Value) -> Option<OfficialMcp> {
             })
             .unwrap_or_default();
         if is_official_combined(&command) {
-            let disabled = !cfg
-                .get("enabled")
-                .and_then(Value::as_bool)
-                .unwrap_or(true);
+            let disabled = !cfg.get("enabled").and_then(Value::as_bool).unwrap_or(true);
             return Some(OfficialMcp {
                 entry_name: entry_name.clone(),
                 disabled,
@@ -149,5 +146,33 @@ mod tests {
           }
         }"#;
         assert!(parse(json).is_none());
+    }
+
+    #[test]
+    fn enabled_true_explicit_not_disabled() {
+        let json = r#"{
+          "mcp": {
+            "memory": {
+              "command": ["npx", "-y", "@modelcontextprotocol/server-memory"],
+              "enabled": true
+            }
+          }
+        }"#;
+        let res = parse(json).expect("should detect");
+        assert!(!res.disabled);
+    }
+
+    #[test]
+    fn missing_enabled_defaults_not_disabled() {
+        // 没有 enabled 字段 → 默认视作 true (生效) → disabled = false
+        let json = r#"{
+          "mcp": {
+            "memory": {
+              "command": ["npx", "-y", "@modelcontextprotocol/server-memory"]
+            }
+          }
+        }"#;
+        let res = parse(json).expect("should detect");
+        assert!(!res.disabled);
     }
 }
