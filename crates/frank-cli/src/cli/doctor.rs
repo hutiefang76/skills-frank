@@ -20,6 +20,7 @@ use clap::Parser;
 
 use crate::adapter;
 use crate::manifest::schema::Platform;
+use crate::mcp_inspect::{self, ProviderMemory, Recommendation};
 use crate::scanner::{self, SkillStatus};
 use crate::state::State;
 use crate::sync_client::SyncClient;
@@ -107,6 +108,9 @@ pub fn run(args: Args) -> Result<()> {
         println!("  {prefix} {:<28} {}", c.label, c.detail);
     }
 
+    // v0.10.6 P2 D3: 单独节, 展示 4 provider 的 MCP memory 状态 + 推荐
+    print_memory_inspection();
+
     println!();
     println!(
         "  Summary: {ok_count} ok, {warn_count} warn, {fail_count} fail (total {})",
@@ -119,6 +123,67 @@ pub fn run(args: Args) -> Result<()> {
     }
     crate::log::ui::success("all checks passed");
     Ok(())
+}
+
+/// v0.10.6 P2 D3: `## 记忆系统全景` 节 — 展示 4 provider MCP memory 探测 + 推荐。
+///
+/// 不算入 ok/warn/fail count (它是参考信息, 不是 pass/fail 检查), 仅给用户
+/// "现在 4 provider 各自记忆 MCP 状态" 一览, 与"建议下一步"。
+fn print_memory_inspection() {
+    let setups = mcp_inspect::inspect_all();
+    let rec = mcp_inspect::recommend(&setups);
+
+    crate::log::ui::section("## 记忆系统全景");
+    for s in &setups {
+        let path_label = s
+            .config_path
+            .as_ref()
+            .map_or_else(|| "(no home)".to_string(), |p| short_path(p));
+        let mem_label = memory_status_label(s);
+        println!("  • {:<10} {:<38} {mem_label}", s.provider.name(), path_label);
+    }
+
+    println!();
+    let frank_label = if mcp_inspect::frank_cli_in_path() {
+        "frank CLI: 在 PATH"
+    } else {
+        "frank CLI: 不在 PATH"
+    };
+    println!("  ─ {frank_label} ─ 推荐: {}", rec.summary());
+
+    // DisableOfficial: 对每个装了 official 的 provider 给禁用命令
+    if matches!(rec, Recommendation::DisableOfficial) {
+        for s in &setups {
+            if let Some(off) = &s.official_mcp {
+                println!(
+                    "    → {}",
+                    Recommendation::disable_hint(s.provider, &off.entry_name)
+                );
+            }
+        }
+    }
+}
+
+/// 把 `~/.gemini/settings.json` 这种长 path 压缩成 `~/.gemini/settings.json` 给终端表显示。
+fn short_path(p: &std::path::Path) -> String {
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(stripped) = p.strip_prefix(&home) {
+            return format!("~/{}", stripped.display());
+        }
+    }
+    p.display().to_string()
+}
+
+/// 单 provider 的"memory MCP 状态"短标签。
+fn memory_status_label(s: &ProviderMemory) -> String {
+    match (&s.official_mcp, &s.frank_mcp) {
+        (Some(off), _) => {
+            let suffix = if off.disabled { " (disabled)" } else { "" };
+            format!("official: {}{suffix}", off.entry_name)
+        }
+        (None, Some(_)) => "frank-mcp 已装".to_string(),
+        (None, None) => "无 memory MCP".to_string(),
+    }
 }
 
 // ---- 各类检查 ----
