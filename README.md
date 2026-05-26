@@ -38,24 +38,37 @@ frank 治理两种来源的 skills:
 
 > v0.1 老 `public` / `own-public` / `private` 通过 serde alias 兼容,不破老配置。
 
-## 核心特性
+## 核心特性 (v0.13.2)
 
-- 🚀 一键安装/卸载/启用/禁用 skills，三平台同步
-- 🔒 公司 skills 与公开 repo 严格分仓，杜绝信息泄露
-- ↩️ 任何操作前自动 snapshot，60 秒回滚 (P1)
-- ☁️ CLAUDE.md / memory / 调用统计 跨设备同步 (走自建 sync-agent,tx:8318)
-- 🤖 AI 可写 feature 分支自动改进 skill 描述（不可写 main）
-- 🎛️ 三种交互方式：CLI / Slash Command / WebUI（P3）
+**Skill / MCP 管理**
+- 🚀 一键 install/uninstall/enable/disable skills, 三平台同步 (Claude Code / codex / opencode)
+- 📦 MCP 真状态探活 — 看 `~/.claude.json` / `~/.codex/config.toml` 等真 config 文件, 不只信 state
+- 🔒 内置 skill 卸载保护 — `frank-ask-*` / `frank-mem-*` 卸了 frank 残废, 默认拦, 要 `--force-internal` 才放
+- ⚡ 装前 preflight 检查 — `frank install frank-ask-gemini` 先 `which gemini`, 没装就警告
 
-## 状态
+**分布式记忆 (mem0 Rust 重写)**
+- 🧠 Hybrid Retrieval 3 路并行召回 + RRF 融合 (ADR-011, Cormack 2009)
+- 🎯 LanceDB 本地主存 + Qdrant 服务端 (ADR-010, 嵌入式向量库, <50ms 命中)
+- 🔄 LLM 事实抽取 (claude/codex/gemini 任一可用, auto fallback) — 默认 0 token (LocalEmbedder fastembed 384d)
+- 🌐 跨设备同步: `frank-sync-agent` (Rust axum REST), 自托管或 `frank.hutiefang.com`
 
-- 🟢 **P0** — 完成：scaffold + manifest + 三平台 adapter + install/uninstall/enable/disable/list 端到端
-- ⚪ P1 — auto-update + rollback + doctor
-- 🟢 **P2** — 部分完成：qdrant + caddy 已部署到 tx:8318
-- ⚪ P3 — Tauri WebUI
-- ⚪ P4 — AI 自维护 PR
-- 🟢 **P5 (frank-memory)** — 进行中：mem0 同思路 Rust 重写,骨架 + 14 单测全绿
-- ⚪ **P6 (frank-orchestrator)** — 设计完成 (ADR-004),实现待启动
+**跨 AI ask + 凭据管理**
+- 🤖 `frank ai ask --claude/--gpt/--opencode/--gemini "..."` 一行调任意 cli (4 家)
+- 🔑 5 层凭据桥 (ADR-009): keychain → env → config → file → OAuth session (不注 env, 避免 401)
+- 📊 history 自动落 + 跨 session 上下文注入 (`--context-from <tag>`)
+
+**Tenant + 防 spam (v0.13.0+)**
+- 🆔 服务端发 token — 客户端首次跑提交机器指纹 (hostname/MAC/CPU/OS), `machine_code` 1:1 绑 tenant (ADR-013)
+- 📊 quota 10k records/tenant, `frank tenant status` 查用量
+- 🗑️ 14 天删除流程 — `frank tenant delete` 倒计时, `cancel-delete` 撤回, 真到点 qdrant points delete
+
+**自建友好**
+- 🐳 一键自建 server — `curl ... install-server.sh | bash`, docker compose 起 caddy + qdrant + sync-agent
+- 📦 docker image 80MB (v0.10.10 起瘦身, 模型走 volume mount)
+- 🌍 用户隔离 — `X-Frank-Token` sha256 → tenant_id, 服务端注入 scope, 数据互不可见
+
+**三种交互**
+- 🎛️ CLI (主) / Web UI (`frank ui`) / Slash command (`/frank:ask:claude`)
 
 ## 快速上手
 
