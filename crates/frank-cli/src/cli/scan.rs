@@ -201,6 +201,7 @@ fn platform_label(p: Platform) -> &'static str {
         Platform::Claude => "claude",
         Platform::Codex => "codex",
         Platform::Opencode => "opencode",
+        Platform::Gemini => "gemini",
     }
 }
 

@@ -238,6 +238,193 @@ pub fn uninstall_codex(name: &str) -> Result<()> {
     atomic_write_toml(&path, &root)
 }
 
+// ─── v0.14: gemini + opencode 写入 ───────────────────────────────────
+
+/// 把 MCP 注入 Gemini 的 `~/.gemini/settings.json` `mcpServers.<name>`.
+///
+/// schema 跟 Claude 几乎一致 (JSON, mcpServers.<name>.{command, args, env}).
+/// 同样**只动单一 entry**, 用 tmp+rename 原子写, 严禁全文重 serialize 破坏用户其他字段.
+pub fn install_gemini(entry: &McpEntry) -> Result<()> {
+    let path = gemini_config_path()?;
+    let mut root = read_json_or_empty(&path)?;
+
+    if !root.get("mcpServers").is_some_and(Value::is_object) {
+        if let Value::Object(ref mut map) = root {
+            map.insert("mcpServers".into(), json!({}));
+        }
+    }
+
+    let server_cfg = json!({
+        "command": entry.command,
+        "args": entry.args,
+    });
+    let server_cfg = if entry.env.is_empty() {
+        server_cfg
+    } else {
+        let mut v = server_cfg;
+        v["env"] = serde_json::to_value(&entry.env)?;
+        v
+    };
+
+    if let Value::Object(ref mut map) = root {
+        if let Some(Value::Object(servers)) = map.get_mut("mcpServers") {
+            servers.insert(entry.name.clone(), server_cfg);
+        }
+    }
+    atomic_write_json(&path, &root)
+}
+
+/// 从 `~/.gemini/settings.json` 反向删 `mcpServers.<name>`. 幂等.
+pub fn uninstall_gemini(name: &str) -> Result<()> {
+    let path = gemini_config_path()?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut root = read_json_or_empty(&path)?;
+    if let Some(Value::Object(servers)) = root.as_object_mut().and_then(|m| m.get_mut("mcpServers"))
+    {
+        servers.remove(name);
+    }
+    atomic_write_json(&path, &root)
+}
+
+/// 列出 Gemini `~/.gemini/settings.json` `mcpServers` 全部条目.
+pub fn list_gemini() -> Result<Vec<McpEntry>> {
+    let path = gemini_config_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let root = read_json_or_empty(&path)?;
+    let Some(servers) = root.get("mcpServers").and_then(Value::as_object) else {
+        return Ok(Vec::new());
+    };
+    Ok(servers
+        .iter()
+        .map(|(name, cfg)| McpEntry {
+            name: name.clone(),
+            command: cfg
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("?")
+                .to_string(),
+            args: cfg
+                .get("args")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            env: HashMap::new(),
+        })
+        .collect())
+}
+
+/// 把 MCP 注入 opencode 的 `~/.config/opencode/opencode.json` `mcp.<name>`.
+///
+/// opencode schema 跟 Claude/Gemini 不同:
+/// - 顶层是 `mcp` (不是 `mcpServers`)
+/// - `command` **是 array** (即 `[bin, ...args]` 全合一), 不分 command/args
+/// - 支持 `enabled: bool` 字段, 默认 true
+///
+/// 我们把 entry.command + entry.args 合并成 command 数组.
+pub fn install_opencode(entry: &McpEntry) -> Result<()> {
+    let path = opencode_config_path()?;
+    let mut root = read_json_or_empty(&path)?;
+
+    if !root.get("mcp").is_some_and(Value::is_object) {
+        if let Value::Object(ref mut map) = root {
+            map.insert("mcp".into(), json!({}));
+        }
+    }
+
+    let mut combined_command: Vec<String> = vec![entry.command.clone()];
+    combined_command.extend(entry.args.iter().cloned());
+
+    let mut server_cfg = json!({
+        "type": "local",
+        "command": combined_command,
+        "enabled": true,
+    });
+    if !entry.env.is_empty() {
+        server_cfg["environment"] = serde_json::to_value(&entry.env)?;
+    }
+
+    if let Value::Object(ref mut map) = root {
+        if let Some(Value::Object(servers)) = map.get_mut("mcp") {
+            servers.insert(entry.name.clone(), server_cfg);
+        }
+    }
+    atomic_write_json(&path, &root)
+}
+
+/// 从 `~/.config/opencode/opencode.json` 反向删 `mcp.<name>`. 幂等.
+pub fn uninstall_opencode(name: &str) -> Result<()> {
+    let path = opencode_config_path()?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut root = read_json_or_empty(&path)?;
+    if let Some(Value::Object(servers)) = root.as_object_mut().and_then(|m| m.get_mut("mcp")) {
+        servers.remove(name);
+    }
+    atomic_write_json(&path, &root)
+}
+
+/// 列出 opencode `~/.config/opencode/opencode.json` `mcp` 全部条目.
+///
+/// 注: opencode command 是 array, 这里把第一个元素当 command, 剩下当 args (复用 McpEntry schema).
+pub fn list_opencode() -> Result<Vec<McpEntry>> {
+    let path = opencode_config_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let root = read_json_or_empty(&path)?;
+    let Some(servers) = root.get("mcp").and_then(Value::as_object) else {
+        return Ok(Vec::new());
+    };
+    Ok(servers
+        .iter()
+        .map(|(name, cfg)| {
+            let command_arr: Vec<String> = cfg
+                .get("command")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let (command, args) = match command_arr.split_first() {
+                Some((first, rest)) => (first.clone(), rest.to_vec()),
+                None => ("?".to_string(), Vec::new()),
+            };
+            McpEntry {
+                name: name.clone(),
+                command,
+                args,
+                env: HashMap::new(),
+            }
+        })
+        .collect())
+}
+
+fn gemini_config_path() -> Result<PathBuf> {
+    Ok(dirs::home_dir()
+        .context("locate home dir")?
+        .join(".gemini")
+        .join("settings.json"))
+}
+
+fn opencode_config_path() -> Result<PathBuf> {
+    Ok(dirs::home_dir()
+        .context("locate home dir")?
+        .join(".config")
+        .join("opencode")
+        .join("opencode.json"))
+}
+
 fn codex_config_path() -> Result<PathBuf> {
     Ok(dirs::home_dir()
         .context("locate home dir")?

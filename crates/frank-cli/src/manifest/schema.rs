@@ -221,6 +221,11 @@ pub enum Platform {
     Codex,
     /// opencode CLI。
     Opencode,
+    /// v0.14: Gemini CLI (`~/.gemini/settings.json`).
+    ///
+    /// MCP 写入端点已实 (installer/mcp.rs install_gemini); skill (symlink) 装支持
+    /// `~/.gemini/skills/` — Gemini CLI 真支持 skill 目录就启用, 否则当成 MCP-only.
+    Gemini,
 }
 
 /// 网络前置要求。

@@ -360,13 +360,42 @@ fn handle_event() -> Result<()> {
     }
 
     // 转发到 frank-sync-agent (best-effort, 失败吞掉不阻断 Claude Code)
-    forward_to_sync_agent(&payload, &to_save);
+    let (ok, fail) = forward_to_sync_agent(&payload, &to_save);
+
+    // v0.14: memorix 借鉴 — 用 hookSpecificOutput.additionalContext 给用户内联反馈.
+    // Claude Code 原生渲染这个字段为系统消息 (anthropic hook spec).
+    // 仅 ok>0 时弹, 全 fail 静默 (用户没看到也好, sync-agent 不可达不该刷屏).
+    if ok > 0 {
+        let preview: String = to_save
+            .first()
+            .map(|(_, c)| c.chars().take(60).collect::<String>())
+            .unwrap_or_default();
+        let more = if ok > 1 {
+            format!(" (+{} more)", ok - 1)
+        } else {
+            String::new()
+        };
+        let fail_note = if fail > 0 {
+            format!(" ({fail} failed)")
+        } else {
+            String::new()
+        };
+        let msg = format!("[frank-memory] saved: {preview}{more}{fail_note}");
+        let output = serde_json::json!({
+            "hookSpecificOutput": {
+                "additionalContext": msg,
+            }
+        });
+        // stdout 一行 JSON, Claude Code 解析 + 渲染
+        println!("{output}");
+    }
     Ok(())
 }
 
 /// 同步调 sync_client::add_raw 转发每条 fact.
+/// 返回 (ok_count, fail_count) — 调用方决定是否给用户反馈.
 /// 失败只 log 不报错 (PostToolUse hook 不该阻断 Claude Code).
-fn forward_to_sync_agent(payload: &Value, items: &[(String, String)]) {
+fn forward_to_sync_agent(payload: &Value, items: &[(String, String)]) -> (usize, usize) {
     let session_id = payload
         .get("session_id")
         .and_then(Value::as_str)
@@ -376,7 +405,7 @@ fn forward_to_sync_agent(payload: &Value, items: &[(String, String)]) {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(error=?e, "hook handle: 无法建 sync_client, 跳过转发");
-            return;
+            return (0, 0);
         }
     };
 
@@ -403,6 +432,7 @@ fn forward_to_sync_agent(payload: &Value, items: &[(String, String)]) {
         }
     }
     tracing::info!(ok, fail, "hook handle: forwarded to sync-agent");
+    (ok, fail)
 }
 
 #[cfg(test)]

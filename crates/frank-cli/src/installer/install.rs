@@ -89,13 +89,16 @@ fn install_mcp(
             .with_context(|| format!("write codex MCP entry for `{}`", skill.name))?;
         installed_platforms.push(Platform::Codex);
     }
-
-    // opencode MCP install: opencode 本身暂不支持 MCP, skip
+    // v0.14: gemini + opencode MCP install (修补缺口, ADR-014)
+    if skill.target_platforms.contains(&Platform::Gemini) {
+        crate::installer::mcp::install_gemini(&entry)
+            .with_context(|| format!("write gemini MCP entry for `{}`", skill.name))?;
+        installed_platforms.push(Platform::Gemini);
+    }
     if skill.target_platforms.contains(&Platform::Opencode) {
-        tracing::warn!(
-            skill = %skill.name,
-            "opencode 暂不支持 MCP, 跳过 (v0.x+)"
-        );
+        crate::installer::mcp::install_opencode(&entry)
+            .with_context(|| format!("write opencode MCP entry for `{}`", skill.name))?;
+        installed_platforms.push(Platform::Opencode);
     }
 
     Ok(InstallOutcome {
@@ -207,6 +210,17 @@ pub fn uninstall_skill_mcp_aware(
         if platforms.contains(&Platform::Codex) {
             if let Err(e) = crate::installer::mcp::uninstall_codex(name) {
                 errors.push(format!("codex: {e:#}"));
+            }
+        }
+        // v0.14: gemini + opencode MCP uninstall (ADR-014)
+        if platforms.contains(&Platform::Gemini) {
+            if let Err(e) = crate::installer::mcp::uninstall_gemini(name) {
+                errors.push(format!("gemini: {e:#}"));
+            }
+        }
+        if platforms.contains(&Platform::Opencode) {
+            if let Err(e) = crate::installer::mcp::uninstall_opencode(name) {
+                errors.push(format!("opencode: {e:#}"));
             }
         }
         if errors.is_empty() {

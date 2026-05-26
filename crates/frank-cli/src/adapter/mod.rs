@@ -21,6 +21,7 @@ use crate::manifest::schema::Platform;
 
 pub mod claude;
 pub mod codex;
+pub mod gemini;
 pub mod opencode;
 
 /// 三平台适配统一接口。
@@ -57,6 +58,7 @@ pub fn for_platform(p: Platform) -> Box<dyn Adapter> {
         Platform::Claude => Box::new(claude::ClaudeAdapter),
         Platform::Codex => Box::new(codex::CodexAdapter),
         Platform::Opencode => Box::new(opencode::OpencodeAdapter),
+        Platform::Gemini => Box::new(gemini::GeminiAdapter),
     }
 }
 
