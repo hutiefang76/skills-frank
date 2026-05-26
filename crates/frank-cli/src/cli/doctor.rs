@@ -437,14 +437,75 @@ fn check_sync_agent() -> Vec<Check> {
         Ok(c) => c,
         Err(e) => return vec![Check::warn("sync-agent", format!("client init: {e:#}"))],
     };
+    let mut checks = Vec::new();
     match client.healthz() {
-        Ok(body) => vec![Check::ok(
+        Ok(body) => checks.push(Check::ok(
             "sync-agent",
             format!("{} → {body}", client.base_url()),
-        )],
-        Err(e) => vec![Check::warn(
-            "sync-agent",
-            format!("{} unreachable: {e:#}", client.base_url()),
-        )],
+        )),
+        Err(e) => {
+            checks.push(Check::warn(
+                "sync-agent",
+                format!("{} unreachable: {e:#}", client.base_url()),
+            ));
+            return checks;
+        }
+    }
+    // v0.13.2: 在 sync-agent 可达基础上加 tenant 状态 — 展示 v0.12.0+ tenant registry 实际数据
+    checks.extend(check_tenant_status(&client));
+    checks
+}
+
+/// v0.13.2: 查 tenant 状态 (records_count / 配额用量 / 是否申请删除).
+///
+/// 没注册时不报错, 提示 "frank tenant register" 引导用户. quota 接近上限时 warn.
+fn check_tenant_status(client: &SyncClient) -> Vec<Check> {
+    match client.tenant_status() {
+        Ok(s) => {
+            let tid = s
+                .get("tenant_id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            let records = s
+                .get("records_count")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            let deletion = s
+                .get("deletion_scheduled_at")
+                .and_then(serde_json::Value::as_i64);
+            let mut out = vec![Check::ok(
+                "tenant",
+                format!("id={tid}, records={records}/10000"),
+            )];
+            // 配额警戒线 80% 提醒
+            if records >= 8000 {
+                out.push(Check::warn(
+                    "tenant-quota",
+                    format!("用量 {records}/10000 ≥ 80%, 接近上限 — frank memory list 看看"),
+                ));
+            }
+            if let Some(ts) = deletion {
+                let now = chrono::Utc::now().timestamp();
+                let days_left = (ts - now) / 86400;
+                out.push(Check::warn(
+                    "tenant-deletion",
+                    format!("已申请删除, {days_left} 天后真删 — 撤销: frank tenant cancel-delete"),
+                ));
+            }
+            out
+        }
+        Err(e) => {
+            let msg = format!("{e:#}");
+            // tenant 没注册 (404 一类) 不算 fail, warn 引导用户
+            if msg.contains("404") || msg.contains("not registered") || msg.contains("tenant") {
+                vec![Check::warn(
+                    "tenant",
+                    "未注册 — 跑任何 frank 命令会自动 provision (`frank tenant status` 单查)"
+                        .to_string(),
+                )]
+            } else {
+                vec![Check::warn("tenant", msg)]
+            }
+        }
     }
 }
