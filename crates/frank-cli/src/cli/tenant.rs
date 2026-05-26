@@ -38,6 +38,9 @@ pub enum TenantCommand {
     /// v0.13.0: 清掉本地 token + machine_id, 下次跑 provision 拿新 token.
     /// **谨慎** — 老 tenant 还在服务器, 你失去访问入口 (服务器看, 但 frank cli 不再认它).
     Reset,
+    /// v0.14.0: 从服务端拉本 tenant 的"已装 skill 列表", 缺什么装什么 (跨机同步).
+    /// 只装 frank-official / frank-recommended; 用户 --url 装的不会同步过来.
+    Sync,
 }
 
 /// 派发器.
@@ -52,10 +55,68 @@ pub fn run(args: Args) -> Result<()> {
                 TenantCommand::Delete => request_deletion(&client),
                 TenantCommand::CancelDelete => cancel_deletion(&client),
                 TenantCommand::Link => link_machine(&client),
+                TenantCommand::Sync => sync_skills(&client),
                 TenantCommand::Reset => unreachable!(),
             }
         }
     }
+}
+
+/// v0.14: `frank tenant sync` — 拉服务端列表, 缺什么装什么.
+fn sync_skills(client: &SyncClient) -> Result<()> {
+    crate::log::ui::section("frank tenant sync — 跨机 skill 同步");
+    let remote = client
+        .tenant_skills_list()
+        .context("拉服务端 tenant skills 列表失败")?;
+    if remote.is_empty() {
+        crate::log::ui::info(
+            "服务端这个 tenant 还没记录 skill — 在 A 机装一些 (frank install nacos-ops),\
+             B 机跑 `frank tenant sync` 就能拿到",
+        );
+        return Ok(());
+    }
+    crate::log::ui::info(&format!("服务端记录 {} 个 skill", remote.len()));
+
+    let state = crate::state::State::load_default().context("load state.json")?;
+    let installed: std::collections::HashSet<&str> =
+        state.iter().map(|s| s.name.as_str()).collect();
+
+    let (already, todo): (Vec<_>, Vec<_>) = remote
+        .iter()
+        .partition(|s| installed.contains(s.name.as_str()));
+
+    if !already.is_empty() {
+        crate::log::ui::info(&format!("本机已装: {} 个, 跳过", already.len()));
+    }
+    if todo.is_empty() {
+        crate::log::ui::success("已跟服务端齐, 无需操作");
+        return Ok(());
+    }
+    crate::log::ui::warn(&format!("本机缺 {} 个 — 开始装", todo.len()));
+    let mut ok = 0usize;
+    let mut failed: Vec<(String, String)> = Vec::new();
+    for s in &todo {
+        crate::log::ui::info(&format!("→ frank install {} ({})", s.name, s.visibility));
+        let install_args = crate::cli::install::Args {
+            name: Some(s.name.clone()),
+            all: false,
+            profile: None,
+            skip_health_check: true,
+            force: false,
+            upgrade: false,
+            url: None,
+            r#ref: None,
+        };
+        match crate::cli::install::run(install_args) {
+            Ok(()) => ok += 1,
+            Err(e) => failed.push((s.name.clone(), format!("{e:#}"))),
+        }
+    }
+    crate::log::ui::success(&format!("装好 {ok} 个 ({} 个失败)", failed.len()));
+    for (name, err) in &failed {
+        crate::log::ui::error(&format!("  `{name}`: {err}"));
+    }
+    Ok(())
 }
 
 /// v0.13.0: link 本机 fingerprint 到已有 tenant (X-Frank-Token 是已有 tenant 的).

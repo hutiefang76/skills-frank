@@ -106,7 +106,22 @@ impl TenantStore {
                     last_seen INTEGER NOT NULL,
                     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE
                 );
-                CREATE INDEX IF NOT EXISTS idx_machine_tenant ON machines(tenant_id);",
+                CREATE INDEX IF NOT EXISTS idx_machine_tenant ON machines(tenant_id);
+                -- v0.14: 跨机 skill 同步表. 服务端只存 (skill 名 + git url + ref + visibility),
+                -- 不存 SKILL.md 内容. 同一 tenant 不同机器 install/uninstall 时上报, 新机器 sync 拉.
+                -- 隐私: 服务端仅接受 visibility ∈ {frank-official, frank-recommended} (端点层硬过滤,
+                -- community/team/private/url-installed 不进表). 用户 --url 装的不上报.
+                CREATE TABLE IF NOT EXISTS tenant_skills (
+                    tenant_id TEXT NOT NULL,
+                    skill_name TEXT NOT NULL,
+                    source_url TEXT,
+                    source_ref TEXT,
+                    visibility TEXT NOT NULL,
+                    last_seen INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, skill_name),
+                    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_tenant_skills ON tenant_skills(tenant_id);",
             )?;
             Ok(conn)
         })
@@ -408,6 +423,91 @@ impl TenantStore {
         .context("spawn_blocking link_machine")??;
         Ok(machine_code)
     }
+
+    // ─── v0.14 跨机 skill 同步 ───────────────────────────────────────
+
+    /// 客户端上报"我装了这个 skill" (visibility 由调用方端点层过滤后才进表).
+    ///
+    /// 幂等: 同 (tenant_id, skill_name) 已存在则 UPSERT (更新 last_seen / ref / visibility).
+    pub async fn report_skill(&self, tenant_id: &str, skill: &ReportedSkill) -> Result<()> {
+        let conn = self.conn.clone();
+        let tid = tenant_id.to_string();
+        let s = skill.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let now = chrono::Utc::now().timestamp();
+            let conn = conn.blocking_lock();
+            conn.execute(
+                "INSERT INTO tenant_skills (tenant_id, skill_name, source_url, source_ref, visibility, last_seen)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(tenant_id, skill_name) DO UPDATE SET
+                   source_url = excluded.source_url,
+                   source_ref = excluded.source_ref,
+                   visibility = excluded.visibility,
+                   last_seen  = excluded.last_seen",
+                rusqlite::params![tid, s.name, s.source_url, s.source_ref, s.visibility, now],
+            )?;
+            Ok(())
+        })
+        .await
+        .context("spawn_blocking report_skill")?
+    }
+
+    /// 客户端拉"我装过哪些" — 新机器 sync 时用. 返回按 last_seen DESC 排序.
+    pub async fn list_skills(&self, tenant_id: &str) -> Result<Vec<ReportedSkill>> {
+        let conn = self.conn.clone();
+        let tid = tenant_id.to_string();
+        tokio::task::spawn_blocking(move || -> Result<Vec<ReportedSkill>> {
+            let conn = conn.blocking_lock();
+            let mut stmt = conn.prepare(
+                "SELECT skill_name, source_url, source_ref, visibility
+                 FROM tenant_skills WHERE tenant_id = ?1
+                 ORDER BY last_seen DESC",
+            )?;
+            let rows = stmt
+                .query_map([tid], |row| {
+                    Ok(ReportedSkill {
+                        name: row.get(0)?,
+                        source_url: row.get(1)?,
+                        source_ref: row.get(2)?,
+                        visibility: row.get(3)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+        .context("spawn_blocking list_skills")?
+    }
+
+    /// 客户端 uninstall 后从 server 也撤掉.
+    pub async fn forget_skill(&self, tenant_id: &str, skill_name: &str) -> Result<()> {
+        let conn = self.conn.clone();
+        let tid = tenant_id.to_string();
+        let name = skill_name.to_string();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let conn = conn.blocking_lock();
+            conn.execute(
+                "DELETE FROM tenant_skills WHERE tenant_id = ?1 AND skill_name = ?2",
+                rusqlite::params![tid, name],
+            )?;
+            Ok(())
+        })
+        .await
+        .context("spawn_blocking forget_skill")?
+    }
+}
+
+/// v0.14 跨机 skill 同步条目 (服务端 ↔ 客户端 wire format, 跟 SQLite schema 对齐).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReportedSkill {
+    /// skill 名 (manifest 内唯一).
+    pub name: String,
+    /// git URL — 客户端 sync 重装时用. None = MCP source.
+    pub source_url: Option<String>,
+    /// branch/tag/sha — 跟 source_url 配对. None = 默认分支.
+    pub source_ref: Option<String>,
+    /// 必填; 服务端端点过滤后只可能是 `frank-official` / `frank-recommended`.
+    pub visibility: String,
 }
 
 /// v0.13.0: provision 接口返回值 (server-side token + 派生 tenant_id + machine_code).

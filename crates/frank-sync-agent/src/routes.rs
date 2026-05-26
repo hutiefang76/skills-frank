@@ -129,6 +129,10 @@ pub fn router(state: AppState) -> Router {
         .route("/sync/skills/push", post(sync_push))
         .route("/sync/skills/pull", get(sync_pull))
         .route("/sync/skills/devices", get(sync_devices))
+        // v0.14: 基于 tenant (跨机) 的 skill 同步 — SQLite 持久化, 多机共享一份
+        .route("/tenant/skills/report", post(tenant_skills_report))
+        .route("/tenant/skills", get(tenant_skills_list))
+        .route("/tenant/skills/:name", delete(tenant_skills_forget))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
 }
@@ -649,4 +653,111 @@ async fn sync_devices(State(state): State<AppState>) -> Json<SyncDevicesResponse
         })
         .collect();
     Json(SyncDevicesResponse { devices })
+}
+
+// ─── v0.14 跨机 skill 同步 (tenant-scoped, SQLite-persisted) ────────────
+
+/// 允许跨机同步的 visibility — 服务端硬过滤, 客户端传错也存不进去.
+///
+/// 隐私契约: community/team/private/url-installed 一律拒收. 用户 `frank install --url` 装的
+/// 不上报, `frank install --profile company` 装的私有也不上报. 服务端不存这些字段, 避免泄漏.
+const ALLOWED_SYNC_VISIBILITIES: &[&str] = &["frank-official", "frank-recommended"];
+
+#[derive(Deserialize)]
+struct TenantSkillReport {
+    name: String,
+    #[serde(default)]
+    source_url: Option<String>,
+    #[serde(default)]
+    source_ref: Option<String>,
+    visibility: String,
+}
+
+#[derive(Serialize)]
+struct TenantSkillReportResponse {
+    status: &'static str,
+    tenant_id: String,
+}
+
+/// POST /tenant/skills/report — 客户端上报"我装了这个 skill".
+///
+/// 校验:
+/// - X-Frank-Token 必有 (走 tenant_id_from_headers 派生)
+/// - visibility ∈ {frank-official, frank-recommended}, 否则 400
+/// - name 非空
+async fn tenant_skills_report(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<TenantSkillReport>,
+) -> ApiResult<Json<TenantSkillReportResponse>> {
+    let tenant_id = tenant_id_from_headers(&headers);
+    if !ALLOWED_SYNC_VISIBILITIES.contains(&body.visibility.as_str()) {
+        return Err(ApiError::status(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "visibility `{}` 不允许跨机同步; 仅 {:?} 入表 (community/team/private 等含用户私有不传服务端)",
+                body.visibility, ALLOWED_SYNC_VISIBILITIES
+            ),
+        ));
+    }
+    if body.name.trim().is_empty() {
+        return Err(ApiError::status(
+            StatusCode::BAD_REQUEST,
+            "skill name 不能为空".to_string(),
+        ));
+    }
+    let skill = crate::tenant::ReportedSkill {
+        name: body.name,
+        source_url: body.source_url,
+        source_ref: body.source_ref,
+        visibility: body.visibility,
+    };
+    state
+        .tenants
+        .report_skill(&tenant_id, &skill)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(TenantSkillReportResponse {
+        status: "ok",
+        tenant_id,
+    }))
+}
+
+#[derive(Serialize)]
+struct TenantSkillsListResponse {
+    tenant_id: String,
+    skills: Vec<crate::tenant::ReportedSkill>,
+}
+
+/// GET /tenant/skills — 拉这个 tenant 已装 skill 列表 (sync 时用).
+async fn tenant_skills_list(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> ApiResult<Json<TenantSkillsListResponse>> {
+    let tenant_id = tenant_id_from_headers(&headers);
+    let skills = state
+        .tenants
+        .list_skills(&tenant_id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(TenantSkillsListResponse { tenant_id, skills }))
+}
+
+/// DELETE /tenant/skills/:name — 卸载后从 server 也撤掉 (不影响其他 tenant).
+async fn tenant_skills_forget(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let tenant_id = tenant_id_from_headers(&headers);
+    state
+        .tenants
+        .forget_skill(&tenant_id, &name)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "tenant_id": tenant_id,
+        "skill_name": name,
+    })))
 }

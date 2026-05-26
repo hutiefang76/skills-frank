@@ -55,6 +55,9 @@ pub enum ConfigCommand {
     /// - `sync.agent_url` — sync-agent base URL (例 `http://localhost:8318`)
     /// - `proxy.http` / `proxy.https` / `proxy.all` — HTTP 代理 URL
     /// - `proxy.no` — 不走代理的域名列表 (逗号分隔)
+    /// - `mirror.github` — github 镜像 URL (v0.14 新, 直连失败时 fallback; 例
+    ///   `https://ghproxy.com` / `https://gitclone.com` / `https://hub.fastgit.xyz`).
+    ///   `frank install` 先试直连, 失败后改写到此 mirror 重试; 仅作用于 `https://github.com/*`.
     ///
     /// 不在列表的键也能写, 但 frank 自己不读 (留给未来扩展).
     Set {

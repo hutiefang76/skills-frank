@@ -176,7 +176,59 @@ pub fn run(mut args: Args) -> Result<()> {
     // 用户感知不到 — 失败也吞 (有 tracing::warn). 详见 cli/refresh_skills.rs.
     crate::cli::refresh_skills::auto_refresh(true);
 
+    // v0.14: 静默上报到服务端 (跨机同步用) — 仅 frank-official / frank-recommended.
+    // 失败吞 (网络断 / token 没配等都不挡主流程), tracing::warn 留痕.
+    report_to_tenant_skills(skill);
+
     Ok(())
+}
+
+/// v0.14: 把 skill metadata 上报给服务端 (POST /tenant/skills/report), 跨机 sync 用.
+///
+/// 隐私契约: 仅 `frank-official` / `frank-recommended` 入服务端. community/team/private/
+/// --url 装的全部跳过 (服务端端点也会 400 拒收, 这里前置防呆).
+///
+/// 失败一律静默 — 网络断 / sync-agent 不可达 / 用户没配 token 都不挡 install 主流程.
+fn report_to_tenant_skills(skill: &crate::manifest::schema::Skill) {
+    use crate::manifest::schema::Visibility;
+    if !matches!(
+        skill.visibility,
+        Visibility::FrankOfficial | Visibility::FrankRecommended
+    ) {
+        tracing::debug!(
+            name = %skill.name,
+            visibility = ?skill.visibility,
+            "skip tenant sync (visibility not eligible)"
+        );
+        return;
+    }
+    let visibility_str = match skill.visibility {
+        Visibility::FrankOfficial => "frank-official",
+        Visibility::FrankRecommended => "frank-recommended",
+        _ => return, // 防御性 (上面已 match 过)
+    };
+    let (source_url, source_ref): (Option<&str>, Option<&str>) = match &skill.source {
+        crate::manifest::schema::Source::Git { url, r#ref, .. } => {
+            (Some(url.as_str()), Some(r#ref.as_str()))
+        }
+        // MCP / Local 也上报, 但 source_url 留 None (sync 时按 name 装走 manifest)
+        _ => (None, None),
+    };
+    let client = match crate::sync_client::SyncClient::from_env_or_config() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::debug!(error = %e, "skip tenant report (no sync-agent config)");
+            return;
+        }
+    };
+    match client.tenant_skills_report(&skill.name, source_url, source_ref, visibility_str) {
+        Ok(_) => {
+            tracing::debug!(name = %skill.name, "reported to tenant skills");
+        }
+        Err(e) => {
+            tracing::warn!(name = %skill.name, error = %e, "tenant skill report failed (silent)");
+        }
+    }
 }
 
 /// 检查 state 已有该 skill 的处理: 没有 → Ok(None); 有 → 看 force/upgrade 决定。

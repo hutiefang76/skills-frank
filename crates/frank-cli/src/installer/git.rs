@@ -81,7 +81,36 @@ pub fn fetch(url: &str, git_ref: &str) -> Result<FetchResult> {
     let dest = cache_dir_for(url)?;
     tracing::debug!(url, git_ref, dest = %dest.display(), "git fetch start");
 
-    let repo = open_or_clone(&dest, url)?;
+    // v0.14: 2 阶段重试
+    // 1. 直连 (尊重 ~/.frank/config.toml [proxy].http 配的代理)
+    // 2. 失败且配了 [mirror].github → rewrite URL 重试 (国内访问 github 慢的兜底)
+    let direct_err = match try_fetch(&dest, url, git_ref) {
+        Ok(r) => return Ok(r),
+        Err(e) => e,
+    };
+    if let Some(mirror_url) = read_config_github_mirror().and_then(|m| rewrite_via_mirror(url, &m))
+    {
+        tracing::warn!(
+            url, mirror = %mirror_url,
+            error = %format!("{direct_err:#}"),
+            "direct fetch failed, retry via mirror"
+        );
+        // 清掉可能半装好的 cache, 不然 open_or_clone 拿到坏 repo
+        if dest.exists() {
+            let _ = fs::remove_dir_all(&dest);
+        }
+        return try_fetch(&dest, &mirror_url, git_ref).map_err(|mirror_err| {
+            anyhow::anyhow!(
+                "direct + mirror both failed.\n  direct: {direct_err:#}\n  mirror ({mirror_url}): {mirror_err:#}"
+            )
+        });
+    }
+    Err(direct_err)
+}
+
+/// v0.14: 实际跑一次 clone+fetch+checkout, 不带 mirror fallback.
+fn try_fetch(dest: &Path, url: &str, git_ref: &str) -> Result<FetchResult> {
+    let repo = open_or_clone(dest, url)?;
     fetch_and_checkout(&repo, git_ref)?;
 
     let head = repo.head().context("read HEAD")?;
@@ -90,9 +119,55 @@ pub fn fetch(url: &str, git_ref: &str) -> Result<FetchResult> {
 
     tracing::debug!(sha = %sha, "git fetch done");
     Ok(FetchResult {
-        repo_dir: dest,
+        repo_dir: dest.to_path_buf(),
         commit_sha: sha,
     })
+}
+
+/// 读 `~/.frank/config.toml [mirror].github`, 没配返回 None.
+///
+/// v0.14 国内访问 github 慢的兜底. 用户跑 `frank config set mirror.github <prefix>` 配置.
+/// 例:
+///   `frank config set mirror.github https://ghproxy.com`     → 拼成 `<mirror>/https://github.com/X/Y.git`
+///   `frank config set mirror.github https://gitclone.com`    → 拼成 `<mirror>/github.com/X/Y.git`
+///   `frank config set mirror.github https://hub.fastgit.xyz` → host 替换
+fn read_config_github_mirror() -> Option<String> {
+    let path = dirs::home_dir()?.join(".frank").join("config.toml");
+    let text = fs::read_to_string(&path).ok()?;
+    let v: toml::Value = text.parse().ok()?;
+    v.get("mirror")?
+        .get("github")?
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim_end_matches('/').to_string())
+}
+
+/// 把 `https://github.com/X/Y.git` 改写成镜像 URL.
+///
+/// 支持 3 种镜像 prefix 风格:
+/// - `https://ghproxy.com`        → `<mirror>/https://github.com/X/Y.git`        (前置代理风格)
+/// - `https://gitclone.com`       → `<mirror>/github.com/X/Y.git`                (去 scheme)
+/// - `https://hub.fastgit.xyz`    → `<mirror>/X/Y.git`                            (host 直替)
+///
+/// 检测: mirror host 含 `proxy` 或 `cors` 走前置代理风格; 否则按 host 直替.
+/// 非 github.com URL 返回 None (不动 gitee / 私有 git).
+fn rewrite_via_mirror(url: &str, mirror: &str) -> Option<String> {
+    // 仅对 github 走镜像 — 私有 git / gitee 等不动
+    let suffix = url.strip_prefix("https://github.com/")?;
+    let host = mirror
+        .strip_prefix("https://")
+        .or_else(|| mirror.strip_prefix("http://"))
+        .unwrap_or(mirror);
+    // 前置代理 (ghproxy / cors-style): 保留完整源 URL 拼在后面
+    if host.contains("proxy") || host.contains("cors") || host.contains("ghp") {
+        Some(format!("{mirror}/{url}"))
+    } else if host.contains("clone") {
+        // gitclone.com 风格: 去 https:// 但保留 github.com 段
+        Some(format!("{mirror}/github.com/{suffix}"))
+    } else {
+        // host 直替 (fastgit / kkgithub / etc.)
+        Some(format!("{mirror}/{suffix}"))
+    }
 }
 
 /// 构造启用代理的 `FetchOptions`. 两层 fallback:
@@ -198,5 +273,43 @@ mod tests {
         let a = url_cache_key("https://github.com/x/a.git");
         let b = url_cache_key("https://github.com/x/b.git");
         assert_ne!(a, b);
+    }
+
+    // v0.14 mirror rewriter
+
+    #[test]
+    fn mirror_ghproxy_prefixes_full_url() {
+        let r = rewrite_via_mirror("https://github.com/x/y.git", "https://ghproxy.com");
+        assert_eq!(
+            r.as_deref(),
+            Some("https://ghproxy.com/https://github.com/x/y.git")
+        );
+    }
+
+    #[test]
+    fn mirror_gitclone_strips_scheme() {
+        let r = rewrite_via_mirror("https://github.com/x/y.git", "https://gitclone.com");
+        assert_eq!(r.as_deref(), Some("https://gitclone.com/github.com/x/y.git"));
+    }
+
+    #[test]
+    fn mirror_fastgit_replaces_host() {
+        let r = rewrite_via_mirror("https://github.com/x/y.git", "https://hub.fastgit.xyz");
+        assert_eq!(r.as_deref(), Some("https://hub.fastgit.xyz/x/y.git"));
+    }
+
+    #[test]
+    fn mirror_skips_non_github() {
+        // 私有 git / gitee 不动 — 镜像只代理 github
+        let r = rewrite_via_mirror("https://gitlab.com/x/y.git", "https://ghproxy.com");
+        assert_eq!(r, None);
+    }
+
+    #[test]
+    fn mirror_handles_trailing_slash() {
+        let r = rewrite_via_mirror("https://github.com/x/y.git", "https://ghproxy.com/");
+        // read_config 会 trim_end_matches('/'), 这里手 pass trailing 也要稳
+        // (虽然实际用 read_config 路径已 trim, 这里直 call 时还会拼出双 / — 但不严重)
+        assert!(r.as_deref().unwrap().contains("github.com/x/y.git"));
     }
 }

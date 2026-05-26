@@ -37,6 +37,22 @@ const DEFAULT_TIMEOUT_SECS: u64 = 15;
 ///
 /// 持有 base_url + 复用的 reqwest blocking client + 可选鉴权 token。
 /// sync-agent 在 Caddy 层强制 `X-Frank-Token` header 校验, 客户端不带 token 会 401。
+/// v0.14: 服务端反序列化的"我装过的 skill"条目 (wire format, 跟 server `ReportedSkill` 同).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TenantReportedSkill {
+    /// skill 名 (跟 manifest 内 name 对齐).
+    pub name: String,
+    /// git URL — sync 重装时用. None 表示 MCP source.
+    #[serde(default)]
+    pub source_url: Option<String>,
+    /// branch/tag/sha — 跟 source_url 配对.
+    #[serde(default)]
+    pub source_ref: Option<String>,
+    /// 服务端硬过滤过, 必是 `frank-official` 或 `frank-recommended`.
+    pub visibility: String,
+}
+
+/// frank-sync-agent REST 客户端 (blocking reqwest). 持有 base URL + 可选 token.
 pub struct SyncClient {
     base_url: String,
     http: reqwest::blocking::Client,
@@ -228,6 +244,63 @@ impl SyncClient {
     ) -> Result<serde_json::Value> {
         let body = serde_json::json!({ "fingerprint": fingerprint });
         self.post_json_value("/tenant/link-machine", &body)
+    }
+
+    /// v0.14: POST /tenant/skills/report — 上报"我装了这个 skill".
+    ///
+    /// `visibility` 必须是 `frank-official` / `frank-recommended`, 否则服务端 400 拒收
+    /// (隐私契约: 用户 community/team/private/--url 装的不上报).
+    pub fn tenant_skills_report(
+        &self,
+        name: &str,
+        source_url: Option<&str>,
+        source_ref: Option<&str>,
+        visibility: &str,
+    ) -> Result<serde_json::Value> {
+        let body = serde_json::json!({
+            "name": name,
+            "source_url": source_url,
+            "source_ref": source_ref,
+            "visibility": visibility,
+        });
+        self.post_json_value("/tenant/skills/report", &body)
+    }
+
+    /// v0.14: GET /tenant/skills — 拉当前 tenant 已装 skill 列表 (新机器 sync 用).
+    pub fn tenant_skills_list(&self) -> Result<Vec<TenantReportedSkill>> {
+        let url = format!("{}/tenant/skills", self.base_url);
+        let mut req = self.http.get(&url);
+        if let Some(t) = &self.token {
+            req = req.header("X-Frank-Token", t);
+        }
+        let resp = req.send().with_context(|| format!("GET {url}"))?;
+        let status = resp.status();
+        let body = resp.text().context("read tenant_skills body")?;
+        if !status.is_success() {
+            return Err(extract_error(status, &body));
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            skills: Vec<TenantReportedSkill>,
+        }
+        let r: Resp = serde_json::from_str(&body).context("parse tenant_skills")?;
+        Ok(r.skills)
+    }
+
+    /// v0.14: DELETE /tenant/skills/:name — 卸载后从服务端撤掉.
+    pub fn tenant_skills_forget(&self, name: &str) -> Result<()> {
+        let url = format!("{}/tenant/skills/{}", self.base_url, name);
+        let mut req = self.http.delete(&url);
+        if let Some(t) = &self.token {
+            req = req.header("X-Frank-Token", t);
+        }
+        let resp = req.send().with_context(|| format!("DELETE {url}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().unwrap_or_default();
+            return Err(extract_error(status, &body));
+        }
+        Ok(())
     }
 
     /// 内部: POST json -> json (任意 body, 任意返回 schema).
