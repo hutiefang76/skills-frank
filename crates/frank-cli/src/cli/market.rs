@@ -37,6 +37,8 @@ pub enum MarketCommand {
     Sync,
     /// 只列预览, 不写文件 (debug 用).
     List,
+    /// v0.14: 清掉 ~/.frank/cache/market/ 所有缓存 (etag + body), 强制下次 sync/list 重拉.
+    ClearCache,
 }
 
 /// 执行 market 命令。
@@ -48,6 +50,7 @@ pub fn run(args: Args) -> Result<()> {
         match args.command {
             MarketCommand::Sync => sync().await,
             MarketCommand::List => list().await,
+            MarketCommand::ClearCache => clear_cache(),
         }
     })
 }
@@ -98,20 +101,9 @@ fn find_github_token() -> Option<String> {
 }
 
 async fn list_dir_names(client: &reqwest::Client, url: &str) -> Result<Vec<String>> {
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .with_context(|| format!("GET {url}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!(
-            "GitHub API returned {status}: {}",
-            body.chars().take(200).collect::<String>()
-        );
-    }
-    let items: Vec<serde_json::Value> = resp.json().await.context("parse GH contents JSON")?;
+    let raw = cached_github_get(client, url).await?;
+    let items: Vec<serde_json::Value> =
+        serde_json::from_str(&raw).context("parse GH contents JSON")?;
     Ok(items
         .iter()
         .filter_map(|v| {
@@ -120,6 +112,124 @@ async fn list_dir_names(client: &reqwest::Client, url: &str) -> Result<Vec<Strin
             (item_type == "dir").then_some(name)
         })
         .collect())
+}
+
+/// v0.14: 24h disk cache + ETag 兜底 (修 cc-switch 卡顿根因, ADR-014 §3.2).
+///
+/// 缓存路径: `~/.frank/cache/market/<sha8(url)>.json` (内容) + `.etag` (头).
+/// 流程:
+/// 1. 文件存在 + mtime 在 24h 内 → 直读返回 (秒级响应)
+/// 2. 否则发请求, 带 If-None-Match: <已存 etag> 头
+///    - 304 Not Modified → 刷 mtime + 用老内容
+///    - 200 OK → 写新内容 + 新 etag, 返回新内容
+///
+/// 失败时若有老 cache 也回退用 (offline 友好).
+async fn cached_github_get(client: &reqwest::Client, url: &str) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let key = {
+        let mut h = Sha256::new();
+        h.update(url.as_bytes());
+        let d = h.finalize();
+        // 8 hex chars 足够区分 (32 bit), 全球 frank 用户 <10K url 不撞
+        d.iter().take(4).fold(String::new(), |mut acc, b| {
+            use std::fmt::Write as _;
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
+    };
+    let cache_dir = dirs::home_dir()
+        .context("locate home dir")?
+        .join(".frank")
+        .join("cache")
+        .join("market");
+    let body_path = cache_dir.join(format!("{key}.json"));
+    let etag_path = cache_dir.join(format!("{key}.etag"));
+
+    // 1. 24h 内热 cache 直返
+    if let Ok(meta) = std::fs::metadata(&body_path) {
+        if let Ok(modified) = meta.modified() {
+            if let Ok(elapsed) = modified.elapsed() {
+                if elapsed.as_secs() < 24 * 3600 {
+                    if let Ok(s) = std::fs::read_to_string(&body_path) {
+                        tracing::debug!(url, age_sec = elapsed.as_secs(), "market cache hit (warm)");
+                        return Ok(s);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 发请求, 带 If-None-Match (如果有老 etag)
+    let mut req = client.get(url);
+    if let Ok(etag) = std::fs::read_to_string(&etag_path) {
+        let etag = etag.trim();
+        if !etag.is_empty() {
+            req = req.header("If-None-Match", etag);
+        }
+    }
+    let resp_result = req.send().await;
+
+    let resp = match resp_result {
+        Ok(r) => r,
+        Err(e) => {
+            // 网络失败 fallback 用老 cache (即使过 24h, 比报错强)
+            if let Ok(stale) = std::fs::read_to_string(&body_path) {
+                tracing::warn!(
+                    url, error = %e,
+                    "market fetch failed, serving stale cache (>=24h)"
+                );
+                return Ok(stale);
+            }
+            return Err(e).with_context(|| format!("GET {url} (no cache fallback)"));
+        }
+    };
+
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_MODIFIED {
+        // 304: 内容没变, 刷 mtime 让下次 24h 内热命中
+        let _ = std::fs::File::open(&body_path).and_then(|f| {
+            // touch — set modified to now via filetime crate? 不引新 dep, 直接 read+write
+            let s = std::fs::read_to_string(&body_path).unwrap_or_default();
+            let _ = std::fs::write(&body_path, s);
+            f.sync_all()
+        });
+        if let Ok(cached) = std::fs::read_to_string(&body_path) {
+            tracing::debug!(url, "market cache 304 (still valid)");
+            return Ok(cached);
+        }
+    }
+
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        // fallback to stale if available
+        if let Ok(stale) = std::fs::read_to_string(&body_path) {
+            tracing::warn!(
+                url, status = %status,
+                "market fetch {} error, serving stale cache", status
+            );
+            return Ok(stale);
+        }
+        anyhow::bail!(
+            "GitHub API returned {status}: {}",
+            body.chars().take(200).collect::<String>()
+        );
+    }
+
+    // 3. 200 OK: 写新 cache + etag
+    let new_etag = resp
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    let body = resp.text().await.context("read body")?;
+    if let Some(parent) = body_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&body_path, &body);
+    if let Some(etag) = new_etag {
+        let _ = std::fs::write(&etag_path, &etag);
+    }
+    Ok(body)
 }
 
 /// 从 modelcontextprotocol/servers GitHub repo 拉 src/ 目录列表 (官方 reference 实现).
@@ -215,6 +325,33 @@ async fn sync() -> Result<()> {
     write_anthropic_skills_manifest(&skills)?;
 
     crate::log::ui::success("sync 完成. 跑 `frank list` 看, `frank install <name>` 装.");
+    Ok(())
+}
+
+/// v0.14: `frank market clear-cache` — 清 ~/.frank/cache/market/ 整目录.
+fn clear_cache() -> Result<()> {
+    let cache_dir = dirs::home_dir()
+        .context("locate home dir")?
+        .join(".frank")
+        .join("cache")
+        .join("market");
+    if !cache_dir.exists() {
+        crate::log::ui::info("没 market 缓存目录可清 (~/.frank/cache/market/ 不存在)");
+        return Ok(());
+    }
+    let mut count = 0_usize;
+    for entry in fs::read_dir(&cache_dir).with_context(|| format!("read {}", cache_dir.display()))? {
+        let entry = entry?;
+        if entry.path().is_file() {
+            let _ = fs::remove_file(entry.path());
+            count += 1;
+        }
+    }
+    crate::log::ui::success(&format!(
+        "清了 {} 个缓存文件 ({}). 下次 `frank market sync` 会重拉.",
+        count,
+        cache_dir.display()
+    ));
     Ok(())
 }
 
