@@ -94,11 +94,34 @@ pub enum AiCommand {
 
 /// `frank ai ask` 参数。
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)] // 4 个快捷开关 + list_models + no_save, 拆 enum 反而麻烦
 pub struct AskArgs {
     /// 目标 provider (claude / codex / opencode / gemini)。
     /// `--list-models` 模式下不需要 (仅列模型不实际 ask).
-    #[arg(long, required_unless_present = "list_models", default_value = "")]
+    ///
+    /// 也可用快捷开关替代: `--claude` / `--gpt` (codex) / `--opencode` / `--gemini`。
+    #[arg(
+        long,
+        required_unless_present_any = ["list_models", "claude", "gpt", "opencode", "gemini"],
+        default_value = ""
+    )]
     pub to: String,
+
+    /// 快捷开关: 等价 `--to claude`。
+    #[arg(long, conflicts_with_all = ["to", "gpt", "opencode", "gemini"])]
+    pub claude: bool,
+
+    /// 快捷开关: 等价 `--to codex` (gpt-5.x 系列)。
+    #[arg(long, conflicts_with_all = ["to", "claude", "opencode", "gemini"])]
+    pub gpt: bool,
+
+    /// 快捷开关: 等价 `--to opencode`。
+    #[arg(long, conflicts_with_all = ["to", "claude", "gpt", "gemini"])]
+    pub opencode: bool,
+
+    /// 快捷开关: 等价 `--to gemini`。
+    #[arg(long, conflicts_with_all = ["to", "claude", "gpt", "opencode"])]
+    pub gemini: bool,
 
     /// 调用方 provider (claude / codex / opencode / gemini), 用于 session 追溯。
     /// SKILL.md 让 AI 调时填: claude code 触发就传 `--from claude`.
@@ -208,11 +231,14 @@ pub struct ShowArgs {
 /// `frank ai history delete` 参数。
 #[derive(Parser, Debug)]
 pub struct DeleteArgs {
-    /// 单删: 历史短码 id (与 --before 二选一).
+    /// 单删: 历史短码 id (与 --before / --purge-legacy 三选一).
     pub id: Option<String>,
     /// 批删: 此日期之前的全删 (YYYY-MM-DD).
-    #[arg(long, conflicts_with = "id")]
+    #[arg(long, conflicts_with_all = ["id", "purge_legacy"])]
     pub before: Option<String>,
+    /// v0.13.1: 清掉全部 v0.10 之前的老 legacy 条目 (id 以 `-legacy` 结尾).
+    #[arg(long, conflicts_with_all = ["id", "before"])]
+    pub purge_legacy: bool,
 }
 
 /// `frank ai history export` 参数。
@@ -236,7 +262,8 @@ pub fn run(args: Args) -> Result<()> {
     })
 }
 
-async fn run_ask(args: AskArgs) -> Result<()> {
+#[allow(clippy::too_many_lines)] // run_ask 是真核心调度, 内联 cred + cmd + timeout + history 落地一气呵成
+async fn run_ask(mut args: AskArgs) -> Result<()> {
     // D1: --list-models 短路 — 列模型不实际 spawn CLI, prompt 可空.
     if args.list_models {
         return models::print_all();
@@ -247,6 +274,25 @@ async fn run_ask(args: AskArgs) -> Result<()> {
     let raw_prompt = args.prompt.join(" ");
     // v0.8 共享上下文: --context-from <tag> 触发, 失败 graceful 降级到不注入
     let prompt = inject_context_if_requested(&raw_prompt, &args).await;
+    // v0.13.1: 快捷开关 --claude / --gpt / --opencode / --gemini 等价 --to <name>.
+    // 同时只允许一个 (clap conflicts_with_all 保证). 解析后写回 args.to, 让下游
+    // (entry_ok/err/history JSON) 都看到统一字段.
+    if args.to.is_empty() {
+        args.to = if args.claude {
+            "claude".to_string()
+        } else if args.gpt {
+            "codex".to_string()
+        } else if args.opencode {
+            "opencode".to_string()
+        } else if args.gemini {
+            "gemini".to_string()
+        } else {
+            // clap required_unless_present_any 已挡, 兜底
+            anyhow::bail!(
+                "missing target provider: `--to <name>` 或 `--claude / --gpt / --opencode / --gemini`"
+            );
+        };
+    }
     let provider = parse_provider(&args.to)?;
     let (bin, cli_args) = invocation(provider, args.model.as_deref());
 
@@ -481,7 +527,16 @@ fn run_history_list(args: ListArgs) -> Result<()> {
     };
     crate::log::ui::section(&format!("ai ask history ({take} 条 / 共 {total} 条)"));
     for e in entries.iter().take(take) {
-        let cwd = e.source_cwd.as_deref().unwrap_or("");
+        // v0.13.1: 老条目 cwd/from 空时显示 - 不留空 (用户提的体验问题)
+        let cwd_display = match e.source_cwd.as_deref() {
+            Some(s) if !s.trim().is_empty() => s,
+            _ => "-",
+        };
+        let from_display = if e.from.is_empty() || e.from == "unknown" {
+            "-"
+        } else {
+            e.from.as_str()
+        };
         let tag = e
             .source_tag
             .as_deref()
@@ -492,18 +547,23 @@ fn run_history_list(args: ListArgs) -> Result<()> {
         // latency_ms 大于 2^53 才丢精度, 这里上限 timeout=3600s
         let latency_s = e.latency_ms as f64 / 1000.0;
         let model = e.model.as_deref().unwrap_or("-");
+        // v0.13.1: -legacy 后缀是 v0.10 之前老 ID 的回填标记, 现在不再有意义,
+        // 显示时去掉后缀让 UI 干净. (真存的 id 还带 -legacy 后缀, 兼容 show/delete by id.)
+        let id_display = e.id.strip_suffix("-legacy").unwrap_or(&e.id);
         println!(
             "{} {}  {} → {} [{}] ({:.1}s){}  id={}",
             status_icon,
             e.ts.split('T').next().unwrap_or(&e.ts),
-            e.from,
+            from_display,
             e.to,
             model,
             latency_s,
             tag,
-            e.id,
+            id_display,
         );
-        println!("  cwd: {cwd}");
+        if cwd_display != "-" {
+            println!("  cwd: {cwd_display}");
+        }
         println!("  Q: {}", e.prompt_excerpt);
         if e.status == "ok" {
             println!("  A: {}", e.response_excerpt);
@@ -511,6 +571,14 @@ fn run_history_list(args: ListArgs) -> Result<()> {
             println!("  ✗ {err}");
         }
         println!();
+    }
+    // v0.13.1: 提示用户老 legacy 条目可批量清掉
+    let legacy_count = entries.iter().filter(|e| e.id.ends_with("-legacy")).count();
+    if legacy_count > 0 {
+        crate::log::ui::info(&format!(
+            "{legacy_count} 条 v0.10 之前老条目 (短 id 已隐去 -legacy 后缀). \
+             清掉: `frank ai history delete --purge-legacy`"
+        ));
     }
     Ok(())
 }
@@ -524,6 +592,25 @@ fn run_history_show(args: ShowArgs) -> Result<()> {
 }
 
 fn run_history_delete(args: DeleteArgs) -> Result<()> {
+    // v0.13.1: --purge-legacy 优先 (clap 已经 conflicts_with 互斥, 这里展示 enum 三分支)
+    if args.purge_legacy {
+        // 拉全表, 收集 -legacy 结尾的 id, 逐条删. 量小 (老条目数), 不优化批 SQL.
+        let all = HistoryStore::list(&ListFilter::default())?;
+        let legacy_ids: Vec<String> = all
+            .iter()
+            .filter(|e| e.id.ends_with("-legacy"))
+            .map(|e| e.id.clone())
+            .collect();
+        let n = legacy_ids.len();
+        for id in &legacy_ids {
+            // 删失败不挂 (可能 id 已被其他人删过), 继续
+            if let Err(e) = HistoryStore::delete(id) {
+                tracing::warn!(%id, error = %e, "delete legacy id failed, continue");
+            }
+        }
+        crate::log::ui::success(&format!("清掉 {n} 条 v0.10 之前老条目"));
+        return Ok(());
+    }
     match (args.id, args.before) {
         (Some(id), _) => {
             HistoryStore::delete(&id)?;
@@ -536,7 +623,11 @@ fn run_history_delete(args: DeleteArgs) -> Result<()> {
             crate::log::ui::success(&format!("删了 {n} 条 (在 {before} 之前)"));
         }
         (None, None) => {
-            anyhow::bail!("要 `frank ai history delete <id>` 或 `frank ai history delete --before YYYY-MM-DD`");
+            anyhow::bail!(
+                "要 `frank ai history delete <id>` 或 \
+                 `frank ai history delete --before YYYY-MM-DD` 或 \
+                 `frank ai history delete --purge-legacy`"
+            );
         }
     }
     Ok(())

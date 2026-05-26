@@ -19,11 +19,33 @@ pub struct Args {
     /// 仅列出已安装的 (state.json 中存在记录)。
     #[arg(long)]
     pub installed: bool,
+
+    /// v0.13.1: 宽表 — 多显示 visibility + profile 两列, description 截 80 字 (默认 35).
+    /// 默认窄表 4 列, 适配 80 列终端窗口.
+    #[arg(long)]
+    pub wide: bool,
 }
 
-/// 表格行结构 (tabled derive)。
+/// 表格行结构 (窄表, 默认) — 4 列适配 80 列终端窗口.
 #[derive(Tabled)]
-struct Row {
+struct NarrowRow {
+    /// skill 名称。
+    name: String,
+
+    /// 资源类型 (skill / mcp)。
+    #[tabled(rename = "type")]
+    r#type: String,
+
+    /// 安装状态: `-` (未装) / `enabled` / `disabled`。
+    status: String,
+
+    /// 一句话说明 (默认截 35 字).
+    description: String,
+}
+
+/// 表格行结构 (宽表, `--wide`) — 显示 visibility + profile, description 截 80 字.
+#[derive(Tabled)]
+struct WideRow {
     /// skill 名称。
     name: String,
 
@@ -40,20 +62,30 @@ struct Row {
     /// 安装状态: `-` (未装) / `enabled` / `disabled`。
     status: String,
 
-    /// 一句话说明 (太长会截断)。
+    /// 一句话说明 (太长会截断).
     description: String,
 }
 
-impl Row {
+impl NarrowRow {
     fn from_skill(s: &Skill, status: &str) -> Self {
         Self {
             name: s.name.clone(),
-            // PascalCase → kebab-case 显示, 例: Official → official
+            r#type: source_type_label(&s.source).to_string(),
+            status: status.to_string(),
+            description: truncate(&s.description, 35),
+        }
+    }
+}
+
+impl WideRow {
+    fn from_skill(s: &Skill, status: &str) -> Self {
+        Self {
+            name: s.name.clone(),
             r#type: source_type_label(&s.source).to_string(),
             visibility: visibility_label(s.visibility),
             profile: s.profile.clone().unwrap_or_else(|| "personal".to_string()),
             status: status.to_string(),
-            description: truncate(&s.description, 60),
+            description: truncate(&s.description, 80),
         }
     }
 }
@@ -119,7 +151,8 @@ pub fn run(args: Args) -> Result<()> {
         Box::new(registry.all().iter())
     };
 
-    let rows: Vec<Row> = candidate
+    // 先收集 (skill, status) 对, 再按 wide/narrow 分别 render — 避免双重过滤逻辑
+    let filtered: Vec<(&Skill, &'static str)> = candidate
         .filter_map(|s| {
             let status =
                 state.get(&s.name).map_or(
@@ -135,16 +168,31 @@ pub fn run(args: Args) -> Result<()> {
             if args.installed && !installed_names.contains(s.name.as_str()) {
                 return None;
             }
-            Some(Row::from_skill(s, status))
+            Some((s, status))
         })
         .collect();
 
-    if rows.is_empty() {
+    if filtered.is_empty() {
         crate::log::ui::warn("no skill matched filter");
         return Ok(());
     }
 
-    crate::log::ui::section(&format!("Skills ({} total)", rows.len()));
-    println!("{}", Table::new(rows));
+    crate::log::ui::section(&format!("Skills ({} total)", filtered.len()));
+    if args.wide {
+        let rows: Vec<WideRow> = filtered
+            .iter()
+            .map(|(s, st)| WideRow::from_skill(s, st))
+            .collect();
+        println!("{}", Table::new(rows));
+    } else {
+        let rows: Vec<NarrowRow> = filtered
+            .iter()
+            .map(|(s, st)| NarrowRow::from_skill(s, st))
+            .collect();
+        println!("{}", Table::new(rows));
+        crate::log::ui::info(
+            "提示: `frank list --wide` 看完整 visibility + profile + 全 description",
+        );
+    }
     Ok(())
 }

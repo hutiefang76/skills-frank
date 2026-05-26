@@ -68,7 +68,7 @@ pub struct Args {
 }
 
 /// 执行 install 命令。
-pub fn run(args: Args) -> Result<()> {
+pub fn run(mut args: Args) -> Result<()> {
     tracing::debug!(?args, "install invoked");
 
     if args.all {
@@ -77,6 +77,18 @@ pub fn run(args: Args) -> Result<()> {
     }
     if args.skip_health_check {
         crate::log::ui::warn("`--skip-health-check` is a no-op (health-check not yet executed)");
+    }
+
+    // v0.13.1: 用户常误把 git URL 当成 name 传 (例: `frank install https://github.com/foo/bar.git`).
+    // 自动识别: 含 `://` 或 `git@` 前缀, 当 `--url` 处理.
+    if args.url.is_none() {
+        if let Some(n) = args.name.as_deref() {
+            if looks_like_git_url(n) {
+                crate::log::ui::info(&format!("识别为 git URL, 走 --url 模式装: {n}"));
+                args.url = Some(n.to_string());
+                args.name = None;
+            }
+        }
     }
 
     // v0.7: --url 模式直接 synthesize Skill, 跳过 manifest 查找.
@@ -227,9 +239,23 @@ fn preflight_external_check(name: &str, force: bool) -> Result<()> {
         return Ok(());
     }
     bail!(
-        "`{name}` already exists in {} platform skills dir as an external entry; run `frank import {name}` to manage it (or pass `--force` to overwrite)",
+        "`{name}` 已存在 ({} 个平台 skills/ 目录看到, 但 frank state.json 没记) — 是你之前手动装的 / 别的工具装的. \n\
+         想接管: `frank import {name}` (frank 接管管理权)\n\
+         想覆盖: `frank install --force` (会删原 symlink, 然后用 frank manifest 装)\n\
+         想升级到新版: `frank install --upgrade` (拉新 commit, 保留 installed_at)",
         platforms.len()
     );
+}
+
+/// 检测 name 是否看起来像 git URL — 避免用户错把 URL 当 name 传.
+///
+/// 触发: `frank install https://github.com/foo/bar.git` → 自动走 `--url` 模式.
+fn looks_like_git_url(s: &str) -> bool {
+    s.starts_with("http://")
+        || s.starts_with("https://")
+        || s.starts_with("git@")
+        || s.starts_with("git://")
+        || s.starts_with("ssh://")
 }
 
 /// `frank install --url <git>` 时把 URL 解析成临时 Skill struct (不写 manifest).
