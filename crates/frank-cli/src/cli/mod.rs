@@ -26,6 +26,7 @@ pub mod disable;
 pub mod doctor;
 pub mod enable;
 pub mod hook;
+pub mod mcp_serve;
 pub mod mcp_shim;
 pub mod import;
 pub mod tenant;
@@ -155,6 +156,13 @@ enum Commands {
     /// 凭证零进入 ~/.claude.json. 同一 MCP 多 profile 跑多套连接.
     #[command(name = "mcp-shim")]
     McpShim(mcp_shim::Args),
+
+    /// v0.14 P2-H: frank 当 MCP server, AI 主动调 (frank.add_memory / search / list_skills / tenant_status).
+    ///
+    /// `~/.claude.json` 加 `"frank": {"command": "frank", "args": ["mcp-serve"]}`,
+    /// Claude/Codex/Gemini 起来后能用 `mcp__frank__*` 标准 MCP 协议调 frank 能力.
+    #[command(name = "mcp-serve")]
+    McpServe(mcp_serve::Args),
 }
 
 /// CLI 入口 dispatcher。
@@ -204,6 +212,7 @@ pub fn run() -> Result<()> {
         Commands::Hook(args) => hook::run(args),
         Commands::Tenant(args) => tenant::run(args),
         Commands::McpShim(args) => mcp_shim::run(args),
+        Commands::McpServe(args) => mcp_serve::run(args),
     }
 }
 
