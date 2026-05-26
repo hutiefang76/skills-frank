@@ -154,17 +154,26 @@ pub fn run(args: Args) -> Result<()> {
     // 先收集 (skill, status) 对, 再按 wide/narrow 分别 render — 避免双重过滤逻辑
     let filtered: Vec<(&Skill, &'static str)> = candidate
         .filter_map(|s| {
-            let status =
-                state.get(&s.name).map_or(
-                    "-",
-                    |st| {
-                        if st.enabled {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        }
-                    },
-                );
+            // v0.13.2: skill 看 state.json; MCP 看 ~/.claude.json 等真 config 文件 active 状态.
+            // 老逻辑 state.json `enabled` 字段对 MCP 不准 — 用户手删 mcpServers.X
+            // 后 state.json 还在 (frank 不感知), 显示 enabled 是误报.
+            let is_mcp = matches!(s.source, Source::Mcp { .. });
+            let status: &'static str = if is_mcp {
+                // 任一平台找到这条 MCP 就算 active
+                if crate::mcp_inspect::find_mcp_by_name(&s.name).is_empty() {
+                    "-"
+                } else {
+                    "enabled"
+                }
+            } else {
+                state.get(&s.name).map_or("-", |st| {
+                    if st.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                })
+            };
             if args.installed && !installed_names.contains(s.name.as_str()) {
                 return None;
             }

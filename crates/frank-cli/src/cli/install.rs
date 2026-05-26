@@ -128,6 +128,8 @@ pub fn run(mut args: Args) -> Result<()> {
     let mut state = State::load_default()?;
     let preexisting_installed_at = preflight_state_check(&state, &name, args.force, args.upgrade)?;
     preflight_external_check(&name, args.force)?;
+    // v0.13.2: frank-ask-<provider> 装前 which <provider>, 没装就警告 (不阻塞, 用户可能后装)
+    preflight_provider_cli_check(&name);
 
     // 4. 跑安装
     let started = Instant::now();
@@ -256,6 +258,34 @@ fn looks_like_git_url(s: &str) -> bool {
         || s.starts_with("git@")
         || s.starts_with("git://")
         || s.starts_with("ssh://")
+}
+
+/// v0.13.2: 装 `frank-ask-<provider>` 前 `which <provider>`, 没装就警告.
+///
+/// 不挡装 — 用户可能正在准备装 cli, 让 frank skill 先就位; 但要告诉用户当前装了
+/// 也不能用, 免得后面 `/frank:ask:gemini` 调不通才发现没 gemini CLI.
+///
+/// 命中 skill → cli 二进制名映射:
+///   frank-ask-claude   → claude
+///   frank-ask-codex    → codex
+///   frank-ask-gpt      → codex (gpt 是 codex 的别名)
+///   frank-ask-gemini   → gemini
+///   frank-ask-opencode → opencode
+fn preflight_provider_cli_check(skill_name: &str) {
+    let bin = match skill_name {
+        "frank-ask-claude" => "claude",
+        "frank-ask-codex" | "frank-ask-gpt" => "codex",
+        "frank-ask-gemini" => "gemini",
+        "frank-ask-opencode" => "opencode",
+        _ => return, // 不是 frank-ask-*, 不检查
+    };
+    if which::which(bin).is_err() {
+        crate::log::ui::warn(&format!(
+            "本机没找到 `{bin}` CLI (`{skill_name}` 走它转发). 装 skill 不挡, 但调用会失败.\n\
+             装 `{bin}`: claude→`brew install --cask claude-code`, codex→`npm i -g @openai/codex`, \
+             gemini→`npm i -g @google/gemini-cli`, opencode→`brew install sst/tap/opencode`"
+        ));
+    }
 }
 
 /// `frank install --url <git>` 时把 URL 解析成临时 Skill struct (不写 manifest).

@@ -135,6 +135,98 @@ pub fn inspect_all() -> Vec<ProviderMemory> {
     Provider::all().iter().map(|&p| inspect(p)).collect()
 }
 
+/// v0.13.2: 查指定 MCP 名是否真在三平台 config 里出现 (frank list MCP 行算"真 enabled" 用).
+///
+/// state.json 只记 frank 装过, 但用户可能手删 ~/.claude.json 里那条 entry → state.json 还在
+/// 但 MCP 实际不再生效. 这函数走 fs 真探, 返回哪些 platform 上 active.
+///
+/// 任何 IO / parse 错误降级为 "not active in that platform", 保持只读语义.
+#[must_use]
+pub fn find_mcp_by_name(mcp_name: &str) -> Vec<Provider> {
+    let mut active = Vec::new();
+    for &p in Provider::all() {
+        let exists = match p {
+            Provider::Claude => claude_has_named(mcp_name),
+            Provider::Codex => codex_has_named(mcp_name),
+            Provider::Gemini => gemini_has_named(mcp_name),
+            Provider::Opencode => opencode_has_named(mcp_name),
+        };
+        if exists {
+            active.push(p);
+        }
+    }
+    active
+}
+
+/// 探 claude `~/.claude.json` 的顶层 `mcpServers.<name>` (project scope 不算 — frank 写顶层).
+fn claude_has_named(name: &str) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    let path = home.join(".claude.json");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    root.get("mcpServers")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|o| o.contains_key(name))
+}
+
+/// 探 codex `~/.codex/config.toml` 的 `[mcp_servers.<name>]` (TOML 表).
+fn codex_has_named(name: &str) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    let path = home.join(".codex").join("config.toml");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(root) = toml::from_str::<toml::Value>(&raw) else {
+        return false;
+    };
+    root.get("mcp_servers")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|t| t.contains_key(name))
+}
+
+/// 探 gemini `~/.gemini/settings.json` 的 `mcpServers.<name>`.
+fn gemini_has_named(name: &str) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    let path = home.join(".gemini").join("settings.json");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    root.get("mcpServers")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|o| o.contains_key(name))
+}
+
+/// 探 opencode `~/.config/opencode/opencode.json` 的 `mcp.<name>` (JSONC 容忍).
+fn opencode_has_named(name: &str) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    let path = home.join(".config").join("opencode").join("opencode.json");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    // opencode 用 jsonc (容许注释), 我们直接 serde_json 试一次 — 失败就当不在
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    root.get("mcp")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|o| o.contains_key(name))
+}
+
 /// 探测单个 provider。出错降级为空结果。
 #[must_use]
 pub fn inspect(provider: Provider) -> ProviderMemory {

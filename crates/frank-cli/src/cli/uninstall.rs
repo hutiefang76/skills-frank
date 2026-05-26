@@ -30,6 +30,32 @@ pub struct Args {
     /// 默认 **删** (跟 v0.7.1 反着, 用户原话 "直接全部删除").
     #[arg(long)]
     pub keep_cache: bool,
+
+    /// v0.13.2: 强制卸 frank 内置 skill (frank-ask-* / frank-mem-*) — 卸了 frank cli
+    /// 功能残废 (`/frank:ask:claude` slash 没了, frank-mem-list 没了). 谨慎用.
+    #[arg(long)]
+    pub force_internal: bool,
+}
+
+/// v0.13.2: frank 内置 skill (frank-cli 自家功能依赖, 卸了功能残废).
+///
+/// 这些 skill 走 `skills-frank-bridge` repo, 在三平台装 `/frank:ask:<provider>` 和
+/// `/frank:mem:<list|search>` slash 命令. 用户没装时 `frank ai ask` 命令本身还能跑
+/// (frank-cli 直接 shell out cli), 但 Claude/Codex 三平台里就没法在 chat 里输 slash 触发了.
+///
+/// 卸要 `--force-internal`, 否则 uninstall 报错并提示.
+const BUILTIN_SKILLS: &[&str] = &[
+    "frank-ask-claude",
+    "frank-ask-codex",
+    "frank-ask-gpt", // alias for codex
+    "frank-ask-gemini",
+    "frank-ask-opencode",
+    "frank-mem-list",
+    "frank-mem-search",
+];
+
+fn is_builtin(name: &str) -> bool {
+    BUILTIN_SKILLS.contains(&name)
 }
 
 /// `frank cleanup` — 一行清 frank 官方装的 (frank-official + frank-recommended) + 引导 brew uninstall.
@@ -42,6 +68,7 @@ pub fn run_cleanup() -> Result<()> {
         name: None,
         including_3rd_party: false,
         keep_cache: false,
+        force_internal: false,
     })?;
     println!();
     crate::log::ui::info("剩下两步 (Homebrew 自己的事, frank 帮不上):");
@@ -60,6 +87,14 @@ pub fn run(args: Args) -> Result<()> {
     let mut state = State::load_default()?;
 
     let targets: Vec<SkillState> = if let Some(name) = args.name.as_ref() {
+        // v0.13.2: frank-ask-* / frank-mem-* 是内置, 卸了 frank cli 功能残废, 拦
+        if is_builtin(name) && !args.force_internal {
+            anyhow::bail!(
+                "`{name}` 是 frank 内置 skill (frank-cli 功能依赖). 卸了 Claude/Codex 里就没\
+                 `/frank:ask:*` 或 `/frank:mem:*` slash 命令了.\n\
+                 真要卸: `frank uninstall {name} --force-internal`"
+            );
+        }
         // 单卸: 用户显式指定, 任何 visibility 都行 (community 自己装的也能单卸)
         let entry = state.get(name).ok_or_else(|| {
             anyhow::anyhow!("`{name}` is not installed (no record in state.json)")
@@ -67,9 +102,12 @@ pub fn run(args: Args) -> Result<()> {
         vec![entry.clone()]
     } else {
         // 无参数 = 清 frank 官方装的全部 (frank-official + frank-recommended)
+        // v0.13.2: 默认保留 frank-ask-* / frank-mem-* (内置, 卸了 frank cli 残废),
+        // 除非 --force-internal 一并清掉.
         let entries: Vec<SkillState> = state
             .iter()
             .filter(|e| is_frank_owned(e, args.including_3rd_party))
+            .filter(|e| args.force_internal || !is_builtin(&e.name))
             .cloned()
             .collect();
         if entries.is_empty() {

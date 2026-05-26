@@ -531,6 +531,7 @@ async fn api_uninstall_skill(
             name: Some(name),
             including_3rd_party: false,
             keep_cache: false,
+            force_internal: false,
         })
     })
     .await

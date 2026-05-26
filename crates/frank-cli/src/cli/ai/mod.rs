@@ -231,14 +231,11 @@ pub struct ShowArgs {
 /// `frank ai history delete` 参数。
 #[derive(Parser, Debug)]
 pub struct DeleteArgs {
-    /// 单删: 历史短码 id (与 --before / --purge-legacy 三选一).
+    /// 单删: 历史短码 id (与 --before 二选一).
     pub id: Option<String>,
     /// 批删: 此日期之前的全删 (YYYY-MM-DD).
-    #[arg(long, conflicts_with_all = ["id", "purge_legacy"])]
+    #[arg(long, conflicts_with = "id")]
     pub before: Option<String>,
-    /// v0.13.1: 清掉全部 v0.10 之前的老 legacy 条目 (id 以 `-legacy` 结尾).
-    #[arg(long, conflicts_with_all = ["id", "before"])]
-    pub purge_legacy: bool,
 }
 
 /// `frank ai history export` 参数。
@@ -507,6 +504,8 @@ fn run_history(args: HistoryArgs) -> Result<()> {
 }
 
 fn run_history_list(args: ListArgs) -> Result<()> {
+    // v0.13.2: 进入 list 前先静默清掉老 -legacy 测试期残留, 用户看不到这步
+    auto_purge_legacy_silent();
     let filter = ListFilter {
         provider: args.provider,
         status: args.status,
@@ -572,14 +571,7 @@ fn run_history_list(args: ListArgs) -> Result<()> {
         }
         println!();
     }
-    // v0.13.1: 提示用户老 legacy 条目可批量清掉
-    let legacy_count = entries.iter().filter(|e| e.id.ends_with("-legacy")).count();
-    if legacy_count > 0 {
-        crate::log::ui::info(&format!(
-            "{legacy_count} 条 v0.10 之前老条目 (短 id 已隐去 -legacy 后缀). \
-             清掉: `frank ai history delete --purge-legacy`"
-        ));
-    }
+    // v0.13.2: 老 legacy 条目已经在 list 入口被 auto_purge_legacy_silent 清掉了, 这里不再提示
     Ok(())
 }
 
@@ -592,25 +584,6 @@ fn run_history_show(args: ShowArgs) -> Result<()> {
 }
 
 fn run_history_delete(args: DeleteArgs) -> Result<()> {
-    // v0.13.1: --purge-legacy 优先 (clap 已经 conflicts_with 互斥, 这里展示 enum 三分支)
-    if args.purge_legacy {
-        // 拉全表, 收集 -legacy 结尾的 id, 逐条删. 量小 (老条目数), 不优化批 SQL.
-        let all = HistoryStore::list(&ListFilter::default())?;
-        let legacy_ids: Vec<String> = all
-            .iter()
-            .filter(|e| e.id.ends_with("-legacy"))
-            .map(|e| e.id.clone())
-            .collect();
-        let n = legacy_ids.len();
-        for id in &legacy_ids {
-            // 删失败不挂 (可能 id 已被其他人删过), 继续
-            if let Err(e) = HistoryStore::delete(id) {
-                tracing::warn!(%id, error = %e, "delete legacy id failed, continue");
-            }
-        }
-        crate::log::ui::success(&format!("清掉 {n} 条 v0.10 之前老条目"));
-        return Ok(());
-    }
     match (args.id, args.before) {
         (Some(id), _) => {
             HistoryStore::delete(&id)?;
@@ -624,13 +597,26 @@ fn run_history_delete(args: DeleteArgs) -> Result<()> {
         }
         (None, None) => {
             anyhow::bail!(
-                "要 `frank ai history delete <id>` 或 \
-                 `frank ai history delete --before YYYY-MM-DD` 或 \
-                 `frank ai history delete --purge-legacy`"
+                "要 `frank ai history delete <id>` 或 `frank ai history delete --before YYYY-MM-DD`"
             );
         }
     }
     Ok(())
+}
+
+/// v0.13.2: 静默删 v0.10 之前的 `-legacy` 后缀老条目 (测试期 garbage, 用户不需要看到).
+///
+/// 在 `frank ai history list` 进入前调一次, 拉全表 → 找 -legacy → 单条删 → 不向用户报数字.
+/// 删失败 (并发或文件锁) 也忍, 下次再清, 不影响 list 主流程.
+fn auto_purge_legacy_silent() {
+    let Ok(all) = HistoryStore::list(&ListFilter::default()) else {
+        return;
+    };
+    for e in &all {
+        if e.id.ends_with("-legacy") {
+            let _ = HistoryStore::delete(&e.id);
+        }
+    }
 }
 
 fn run_history_export(args: ExportArgs) -> Result<()> {
