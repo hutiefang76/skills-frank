@@ -26,6 +26,7 @@ pub mod disable;
 pub mod doctor;
 pub mod enable;
 pub mod hook;
+pub mod mcp_shim;
 pub mod import;
 pub mod tenant;
 pub mod install;
@@ -147,6 +148,13 @@ enum Commands {
 
     /// Tenant 管理 — register / status / delete / cancel-delete (v0.12.0 用户隔离).
     Tenant(tenant::Args),
+
+    /// v0.14 凭证-操作分离: MCP 启动器, 走 frank-cred 拿 env 再 exec 真 MCP server (ADR-014 §3.5).
+    ///
+    /// `~/.claude.json` 写 `"command": "frank", "args": ["mcp-shim", "doris", "--profile", "uat"]`,
+    /// 凭证零进入 ~/.claude.json. 同一 MCP 多 profile 跑多套连接.
+    #[command(name = "mcp-shim")]
+    McpShim(mcp_shim::Args),
 }
 
 /// CLI 入口 dispatcher。
@@ -195,6 +203,7 @@ pub fn run() -> Result<()> {
         Commands::RefreshSkills(args) => refresh_skills::run(args),
         Commands::Hook(args) => hook::run(args),
         Commands::Tenant(args) => tenant::run(args),
+        Commands::McpShim(args) => mcp_shim::run(args),
     }
 }
 
