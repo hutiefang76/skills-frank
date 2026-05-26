@@ -34,7 +34,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-gpt
-    visibility: frank-recommended
+    visibility: frank-official
     target_platforms: [claude, codex]
 
   - name: frank-ask-claude
@@ -43,7 +43,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-claude
-    visibility: frank-recommended
+    visibility: frank-official
     target_platforms: [claude, codex]
 
   - name: frank-ask-opencode
@@ -52,7 +52,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-opencode
-    visibility: frank-recommended
+    visibility: frank-official
     target_platforms: [claude, codex]
 
   - name: frank-ask-gemini
@@ -61,7 +61,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-ask-gemini
-    visibility: frank-recommended
+    visibility: frank-official
     target_platforms: [claude, codex]
 
   - name: frank-mem-list
@@ -70,7 +70,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-mem-list
-    visibility: frank-recommended
+    visibility: frank-official
     target_platforms: [claude, codex]
 
   - name: frank-mem-search
@@ -79,7 +79,7 @@ skills:
       type: git
       url: https://github.com/hutiefang76/skills-frank-bridge.git
       subpath: frank-mem-search
-    visibility: frank-recommended
+    visibility: frank-official
     target_platforms: [claude, codex]
 
   # ───── upstream / 第三方 (anthropics / open-source) ─────

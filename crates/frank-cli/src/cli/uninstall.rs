@@ -112,7 +112,7 @@ pub fn run(args: Args) -> Result<()> {
             .collect();
         if entries.is_empty() {
             crate::log::ui::info(
-                "没 frank 官方 skill 可卸 (state.json 没 frank-official / frank-recommended)",
+                "没 frank 自家 skill 可卸 (state.json 里没 frank-official 条目)",
             );
             return Ok(());
         }
@@ -120,16 +120,17 @@ pub fn run(args: Args) -> Result<()> {
         let skipped = total - entries.len();
         if args.including_3rd_party {
             crate::log::ui::warn(&format!(
-                "--including-3rd-party: 卸 {} 个 (含第三方)",
+                "--including-3rd-party: 卸 {} 个 (含 frank-recommended 上游 + 用户自装)",
                 entries.len()
             ));
         } else if skipped > 0 {
             crate::log::ui::warn(&format!(
-                "卸 {} 个 frank 官方 skill — {} 个第三方 (community/team/private) 保留 (加 --including-3rd-party 也清掉)",
+                "卸 {} 个 frank 自家 skill — {} 个 upstream/用户自装的保留 \
+                 (frank 只为自己写的负责; 加 --including-3rd-party 一并清)",
                 entries.len(), skipped
             ));
         } else {
-            crate::log::ui::warn(&format!("卸 {} 个 frank 官方 skill", entries.len()));
+            crate::log::ui::warn(&format!("卸 {} 个 frank 自家 skill", entries.len()));
         }
         entries
     };
@@ -171,29 +172,26 @@ pub fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
-/// 判断 state entry 是不是 frank 自家装的 (frank-official 或 frank-recommended).
+/// v0.13.3: 判断 state entry 是不是 frank 自己写的 (frank-official only).
 ///
-/// 老 state.json 没 visibility 字段 (反序列化为 None) → 通过 manifest 反查 fallback.
-/// 还查不到 (例 v0.7.0 之前装的, manifest 也没 — 比如老 frank-bridge) → 当成 frank 装的清掉.
+/// 用户原话: "frank 只应该为自己程序出的东西负责". 所以默认 cleanup 只清 frank-official
+/// (hutiefang76 自己写的: nacos-ops / streampark-ops / doris-ops + frank-ask-* / frank-mem-*).
+/// frank-recommended (anthropics/obra/MCP 等 upstream curated) **不清** — 用户装了用户自己卸.
+///
+/// `--including-3rd-party` 触发时返回 true (一并清所有 visibility).
 fn is_frank_owned(entry: &SkillState, including_3rd_party: bool) -> bool {
     if including_3rd_party {
         return true;
     }
     // 优先用 state 里记的 visibility
     if let Some(vis) = entry.visibility {
-        return matches!(
-            vis,
-            Visibility::FrankOfficial | Visibility::FrankRecommended
-        );
+        return matches!(vis, Visibility::FrankOfficial);
     }
     // fallback: manifest 找
     let manifests = crate::manifest::parser::discover().unwrap_or_default();
     let skills = crate::manifest::parser::merge(manifests);
     if let Some(skill) = skills.iter().find(|s| s.name == entry.name) {
-        return matches!(
-            skill.visibility,
-            Visibility::FrankOfficial | Visibility::FrankRecommended
-        );
+        return matches!(skill.visibility, Visibility::FrankOfficial);
     }
     // 都查不到 — 老 state 又不在 manifest, 保守判定为"老的 frank 装的"清掉
     // (用户的 --url 装的 v0.7+ 都有 state.visibility=Community, 不会走到这里)
