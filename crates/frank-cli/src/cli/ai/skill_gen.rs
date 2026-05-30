@@ -47,13 +47,13 @@ impl SkillTemplate {
     /// skill 名 (例 `frank-ask-claude-kimi-k2-5`)。
     ///
     /// 跟 slash command 一致 — 用户输入 `/<skill_name> <prompt>` 触发。
+    ///
+    /// v0.15: model 名已含 provider 前缀时去重 — models.dev 的 id 常带前缀
+    /// (`claude-opus-4-5`, `gemini-3-pro`), 避免双前缀 `frank-ask-claude-claude-opus-4-5`
+    /// → 简洁的 `frank-ask-claude-opus-4-5`. codex 模型 (`gpt-5.5`) 无 `codex-` 前缀, 不受影响.
     #[must_use]
     pub fn skill_name(&self) -> String {
-        format!(
-            "frank-ask-{}-{}",
-            self.provider,
-            safe_model_name(&self.model)
-        )
+        skill_name_for(&self.provider, &self.model)
     }
 
     /// 完整目标路径 (例 `~/.claude/skills/frank-ask-claude-kimi-k2-5/`)。
