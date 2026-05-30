@@ -24,6 +24,7 @@ pub mod codex;
 pub mod env;
 pub mod gemini;
 pub mod opencode;
+pub mod registry;
 
 /// 单条模型记录 — 名字 + 来源 (用于 UI 显示 `[配置文件]` / `[env]` / `[内置兜底]`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +35,7 @@ pub struct ModelEntry {
     pub source: ModelSource,
 }
 
-/// 模型来源 — 3 种.
+/// 模型来源 — 4 种 (v0.15 加 Registry 动态源).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelSource {
     /// 来自原生 CLI 配置文件 (例 `~/.claude/settings.json`).
@@ -43,7 +44,10 @@ pub enum ModelSource {
     /// 来自环境变量 (例 `ANTHROPIC_MODEL`).
     /// `name` 是 env var 名字.
     EnvVar(String),
-    /// frank 内置 alias 兜底 (前 2 路全空时用).
+    /// v0.15: 来自 models.dev 动态注册表 (跨厂当前模型库, 12h disk cache).
+    /// 解决"模型列表写死"问题 — 用户没显式配时也能拿到**当前**模型, 自动随上游更新.
+    Registry,
+    /// frank 内置 alias 兜底 (Registry 拉不到 + 无 cache 时最后兜底).
     BuiltinAlias,
 }
 
@@ -56,7 +60,8 @@ impl ModelSource {
         match self {
             ModelSource::ConfigFile(_) => 0,
             ModelSource::EnvVar(_) => 1,
-            ModelSource::BuiltinAlias => 2,
+            ModelSource::Registry => 2,
+            ModelSource::BuiltinAlias => 3,
         }
     }
 
@@ -76,6 +81,7 @@ impl ModelSource {
                 format!("配置 {p}")
             }
             ModelSource::EnvVar(name) => format!("env {name}"),
+            ModelSource::Registry => "models.dev".to_string(),
             ModelSource::BuiltinAlias => "内置兜底".to_string(),
         }
     }
@@ -140,9 +146,13 @@ pub fn collect_user_models(provider: &str) -> Vec<ModelEntry> {
     // 路 2: env vars (provider → env var 名映射, 详见 env::read_for)
     out.extend(env::read_for(provider));
 
-    // 路 3: alias 总是加 — 用户配的 + 内置兜底 model 都能列
-    // (v0.10.9 修: v0.10.8 是 "前2路全空才加 alias", 导致用户配 haiku 后
-    // 内置的 sonnet/opus 被吞。改为总加,去重时同名按优先级保 ConfigFile)
+    // 路 3 (v0.15): models.dev 动态注册表 — 当前模型库, 12h disk cache.
+    // 取代"写死兜底"的角色: 拉得到就用当前真实模型; 拉不到/无网无 cache 才落到内置 alias.
+    out.extend(registry::read_models(provider));
+
+    // 路 4: alias 兜底 — 总是加, 去重时同名按优先级保高 (ConfigFile > Env > Registry > Alias).
+    // (v0.10.9 修: v0.10.8 是 "前路全空才加 alias", 导致用户配 haiku 后内置 sonnet/opus
+    // 被吞。改为总加,去重时同名保高优先级 source。)
     out.extend(builtin_aliases(provider));
 
     out
