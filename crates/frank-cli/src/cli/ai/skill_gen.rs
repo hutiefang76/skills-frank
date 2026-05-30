@@ -131,6 +131,22 @@ pub fn safe_model_name(raw: &str) -> String {
         .collect()
 }
 
+/// 单一权威的 skill 名构造 (provider + model → `frank-ask-<provider>-<safe-model>`).
+///
+/// v0.15: model 已含 provider 前缀时去重 — models.dev 的 id 常带前缀 (`claude-opus-4-5`,
+/// `gemini-3-pro`), 避免双前缀 `frank-ask-claude-claude-opus-4-5` → `frank-ask-claude-opus-4-5`.
+/// codex (`gpt-5.5`) 无 `codex-` 前缀不受影响; `gemma-*` 不含 `gemini-` 前缀也保留.
+///
+/// `SkillTemplate::skill_name` 和 `clean_stale_skills` 都走这个, 保证生成名 == 清理保留名,
+/// 不会因逻辑分叉导致每次 refresh 误删刚生成的 skill (churn).
+#[must_use]
+pub fn skill_name_for(provider: &str, model: &str) -> String {
+    let safe = safe_model_name(model);
+    let dup_prefix = format!("{provider}-");
+    let model_part = safe.strip_prefix(&dup_prefix).unwrap_or(&safe);
+    format!("frank-ask-{provider}-{model_part}")
+}
+
 /// 原子写: 先写 tmp 再 rename, 防止 SIGKILL 时写半截污染目录。
 ///
 /// 已存在内容**一样**时直接跳过 (不动文件 mtime, 减少不必要 IO).
@@ -182,7 +198,7 @@ pub fn clean_stale_skills(
     // 当前应该保留的 skill 名 set
     let keep: HashSet<String> = current_models
         .iter()
-        .map(|m| format!("frank-ask-{provider}-{}", safe_model_name(m)))
+        .map(|m| skill_name_for(provider, m))
         .collect();
     let prefix = format!("frank-ask-{provider}-");
 
@@ -269,6 +285,40 @@ mod tests {
             target_dir: PathBuf::from("/tmp/skills"),
         };
         assert_eq!(tpl.skill_name(), "frank-ask-claude-kimi-k2-5");
+    }
+
+    #[test]
+    fn skill_name_strips_dup_provider_prefix() {
+        // v0.15: models.dev id 带 provider 前缀 → 去重避免双前缀
+        assert_eq!(
+            skill_name_for("claude", "claude-opus-4-5"),
+            "frank-ask-claude-opus-4-5"
+        );
+        assert_eq!(
+            skill_name_for("gemini", "gemini-3-pro"),
+            "frank-ask-gemini-3-pro"
+        );
+        // 不带前缀的不动 (codex gpt-5.5)
+        assert_eq!(skill_name_for("codex", "gpt-5.5"), "frank-ask-codex-gpt-5-5");
+        // gemma 不带 gemini 前缀, 保留
+        assert_eq!(
+            skill_name_for("gemini", "gemma-4-31b-it"),
+            "frank-ask-gemini-gemma-4-31b-it"
+        );
+    }
+
+    #[test]
+    fn clean_stale_keep_names_match_generated() {
+        // 关键回归: clean_stale_skills 的 keep set 必须 == skill_name() 生成名,
+        // 否则每次 refresh 误删刚生成的 (churn). 两边都走 skill_name_for 保证一致.
+        let model = "claude-opus-4-5".to_string();
+        let generated = SkillTemplate {
+            provider: "claude".to_string(),
+            model: model.clone(),
+            target_dir: PathBuf::from("/tmp"),
+        }
+        .skill_name();
+        assert_eq!(generated, skill_name_for("claude", &model));
     }
 
     #[test]
